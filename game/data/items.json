@@ -1,0 +1,12 @@
+{
+  "flashlight": {
+    "type": "equipment"
+  },
+  "battery": {
+    "type": "consumable",
+    "restore": 35
+  },
+  "exit_key": {
+    "type": "key"
+  }
+}

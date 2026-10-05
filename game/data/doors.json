@@ -1,0 +1,5 @@
+{
+  "exit_door": {
+    "required_key": "exit_key"
+  }
+}
