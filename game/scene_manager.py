@@ -1,6 +1,7 @@
 from game.ghost.ghost import Ghost
 from game.player.player import HorrorPlayer
 from game.world.house import House
+from game.world.environment import create_environment
 
 
 class SceneManager:
@@ -14,6 +15,7 @@ class SceneManager:
         self.house = House(
             on_escape=on_escape
         )
+        self.lights = create_environment(self.house)
 
         # =========================
         # PLAYER
@@ -22,7 +24,9 @@ class SceneManager:
         self.player = HorrorPlayer(
             hud=hud,
             position=self.house.player_spawn,
+            rotation_y=90,
         )
+        self.player.camera_pivot.rotation_x = 32
 
         # =========================
         # GHOST
@@ -35,6 +39,7 @@ class SceneManager:
             hud=hud,
             on_caught=on_caught,
             position=self.house.ghost_spawn,
+            collision_root=self.house,
         )
 
     def stop_gameplay(self):

@@ -9,7 +9,8 @@ class Door(Entity):
 
         super().__init__(
             model="cube",
-            color=color.rgb(
+            shader=None,
+            color=color.rgb32(
                 85,
                 55,
                 35,

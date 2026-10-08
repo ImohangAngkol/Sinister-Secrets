@@ -25,17 +25,19 @@ class HUD(Entity):
             y=0.28,
             scale=1.15,
         )
+        self.message_revision = 0
 
         # Keep this while developing the AI.
         self.ghost_state = Text(
             parent=camera.ui,
             text="Ghost: PATROL",
-            x=0.62,
+            x=camera.aspect_ratio / 2 - 0.03,
             y=0.46,
-            origin=(-0.5, 0.5),
+            origin=(0.5, 0.5),
             scale=0.82,
             color=color.white,
         )
+        self.ghost_state.create_background(padding=0.025, color=color.black66)
 
     def set_prompt(self, text: str):
         if text:
@@ -51,19 +53,23 @@ class HUD(Entity):
         seconds: float = 2.0,
     ):
         self.message.text = text
+        self.message.enabled = True
+        self.message.create_background(padding=0.025, color=color.black66)
+        self.message_revision += 1
 
         invoke(
             self._clear_message_if_same,
-            text,
+            self.message_revision,
             delay=seconds,
         )
 
     def _clear_message_if_same(
         self,
-        expected: str,
+        expected: int,
     ):
-        if self.message.text == expected:
+        if self.message_revision == expected:
             self.message.text = ""
+            self.message.enabled = False
 
     def set_ghost_state(
         self,
@@ -72,6 +78,7 @@ class HUD(Entity):
         self.ghost_state.text = (
             f"Ghost: {state_name}"
         )
+        self.ghost_state.create_background(padding=0.025, color=color.black66)
 
     def refresh_inventory(
         self,

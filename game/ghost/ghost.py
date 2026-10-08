@@ -13,6 +13,7 @@ class Ghost(Entity):
         graph,
         hud,
         on_caught,
+        collision_root=None,
         **kwargs,
     ):
 
@@ -23,12 +24,8 @@ class Ghost(Entity):
         super().__init__(
             model="cube",
 
-            color=color.rgba(
-                225,
-                225,
-                235,
-                220,
-            ),
+            shader=None,
+            color=color.rgb32(160, 205, 210),
 
             scale=(
                 0.8,
@@ -42,6 +39,7 @@ class Ghost(Entity):
 
             **kwargs,
         )
+        self.set_shader_auto()
 
         # =========================
         # JUMPSCARE
@@ -62,6 +60,7 @@ class Ghost(Entity):
             graph=graph,
             hud=hud,
             jumpscare=self.jumpscare,
+            collision_root=collision_root,
         )
 
     def update(self):

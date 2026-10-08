@@ -13,7 +13,7 @@ class InventoryUI(Text):
                 "Keys: 0"
             ),
 
-            x=-0.86,
+            x=-camera.aspect_ratio / 2 + 0.03,
             y=0.46,
 
             origin=(-0.5, 0.5),
@@ -22,6 +22,7 @@ class InventoryUI(Text):
 
             color=color.white,
         )
+        self.create_background(padding=0.025, color=color.black66)
 
     def refresh(
         self,
@@ -32,7 +33,8 @@ class InventoryUI(Text):
 
             flashlight_text = (
                 f"Flashlight: "
-                f"{int(player.stats.battery)}%"
+                f"{int(player.stats.battery)}% "
+                f"({'ON' if player.flashlight_on else 'OFF'})"
             )
 
         else:
@@ -41,8 +43,11 @@ class InventoryUI(Text):
                 "Flashlight: NOT FOUND"
             )
 
-        self.text = (
+        text = (
             f"{flashlight_text}\n"
             f"Keys: "
             f"{player.inventory.key_count()}"
         )
+        if self.text != text:
+            self.text = text
+            self.create_background(padding=0.025, color=color.black66)

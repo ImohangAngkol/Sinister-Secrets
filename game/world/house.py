@@ -11,6 +11,8 @@ class House(Entity):
 
     def __init__(self, on_escape):
         super().__init__()
+        # Panda's generated shader supports ambient, directional and spot lights.
+        self.set_shader_auto()
 
         # =====================================
         # SPAWN LOCATIONS
@@ -55,10 +57,11 @@ class House(Entity):
 
             scale=scale,
 
-            color=color.rgb(
-                65,
-                68,
-                78,
+            shader=None,
+            color=color.rgb32(
+                125,
+                129,
+                138,
             ),
 
             collider="box",
@@ -91,10 +94,11 @@ class House(Entity):
                 30,
             ),
 
-            color=color.rgb(
-                35,
-                37,
-                42,
+            shader=None,
+            color=color.rgb32(
+                60,
+                63,
+                69,
             ),
 
             collider="box",
@@ -188,6 +192,8 @@ class House(Entity):
             position=(-12, 0.5, -12),
             scale=(1, 1, 1),
             color=color.red,
+            shader=None,
+            collider="box",
         )
 
         Entity(
@@ -196,6 +202,8 @@ class House(Entity):
             position=(12, 0.5, 12),
             scale=(1, 1, 1),
             color=color.green,
+            shader=None,
+            collider="box",
         )
 
     # =========================================
@@ -397,14 +405,14 @@ class House(Entity):
             parent=self,
 
             position=(
-                8.6,
+                8.5,
                 0,
                 14.75,
             ),
 
             scale=(
-                2.8,
-                3.2,
+                3.0,
+                3.0,
                 0.35,
             ),
 

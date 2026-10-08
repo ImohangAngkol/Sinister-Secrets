@@ -1,4 +1,5 @@
-from ursina import camera, raycast
+from ursina import camera
+from game.world.environment import world_raycast as raycast
 
 from game.settings import INTERACT_DISTANCE
 

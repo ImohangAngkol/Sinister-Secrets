@@ -7,6 +7,7 @@ from ursina import (
     camera,
     color,
     held_keys,
+    mouse,
     scene,
     time,
 )
@@ -14,6 +15,11 @@ from ursina import (
 from ursina.prefabs.first_person_controller import (
     FirstPersonController,
 )
+from ursina.prefabs import first_person_controller
+from game.world.environment import world_raycast
+
+# Keep Ursina's controller and replace its version-specific ray orientation bug.
+first_person_controller.raycast = world_raycast
 
 from game.items.inventory import Inventory
 from game.player.camera_controller import CameraController
@@ -59,32 +65,14 @@ class HorrorPlayer(FirstPersonController):
 
         self.flashlight_light = SpotLight(
             parent=scene,
-            color=color.rgba(
-                255,
-                245,
-                220,
-                255,
-            ),
+            color=color.rgb(0, 0, 0),
         )
-
-        self.flashlight_light.enabled = False
-
-        # Narrow the spotlight when the underlying lens is available.
-        try:
-            lens = (
-                self.flashlight_light
-                ._light
-                .get_lens()
-            )
-
-            lens.set_fov(52)
-            lens.set_near_far(
-                0.2,
-                24,
-            )
-
-        except Exception:
-            pass
+        lens = self.flashlight_light._light.get_lens()
+        lens.set_fov(52)
+        lens.set_near_far(0.1, 24)
+        self.flashlight_light._light.set_attenuation(Vec3(1, 0, 0.015))
+        self.flashlight_light._light.set_shadow_caster(True, 512, 512)
+        self.cursor.color = color.white
 
         self.hud.refresh_inventory(self)
 
@@ -116,7 +104,20 @@ class HorrorPlayer(FirstPersonController):
             self.speed = PLAYER_SPEED
             self.stats.noise_level = 0
 
-        super().update()
+        # Ursina's controller uses short rays. Substeps prevent sprinting through
+        # thin walls during a slow frame; apply mouse movement only once.
+        frame_dt = time.dt
+        velocity = mouse.velocity
+        remaining = min(max(frame_dt, 0), 0.1)
+        try:
+            while remaining > 0:
+                time.dt = min(remaining, 1 / 60)
+                super().update()
+                remaining -= time.dt
+                mouse.velocity = Vec3(0, 0, 0)
+        finally:
+            time.dt = frame_dt
+            mouse.velocity = velocity
 
         self.camera_controller.update()
         self._update_flashlight()
@@ -166,9 +167,8 @@ class HorrorPlayer(FirstPersonController):
             not self.flashlight_on
         )
 
-        self.flashlight_light.enabled = (
-            self.flashlight_on
-        )
+        self._set_flashlight_light(self.flashlight_on)
+        self.hud.refresh_inventory(self)
 
     def add_battery(self, amount: float):
         self.stats.battery = min(
@@ -199,10 +199,7 @@ class HorrorPlayer(FirstPersonController):
                 camera.world_position
             )
 
-            self.flashlight_light.look_at(
-                camera.world_position
-                + camera.forward * 10
-            )
+            self.flashlight_light.world_rotation = camera.world_rotation
 
             # Small flicker at low battery.
             if (
@@ -210,23 +207,35 @@ class HorrorPlayer(FirstPersonController):
                 < LOW_BATTERY_THRESHOLD
                 and random.random() < 0.08
             ):
-                self.flashlight_light.enabled = False
+                self._set_flashlight_light(False)
 
             else:
-                self.flashlight_light.enabled = True
+                self._set_flashlight_light(True)
 
             if self.stats.battery <= 0:
                 self.flashlight_on = False
-                self.flashlight_light.enabled = False
+                self._set_flashlight_light(False)
 
                 self.hud.show_message(
                     "The flashlight battery died."
                 )
 
         else:
-            self.flashlight_light.enabled = False
+            self.flashlight_on = False
+            self._set_flashlight_light(False)
 
         self.hud.refresh_inventory(self)
 
     def cleanup(self):
-        self.flashlight_light.enabled = False
+        self.flashlight_on = False
+        self._set_flashlight_light(False)
+        self.cursor.enabled = False
+
+    def _set_flashlight_light(self, enabled):
+        # Stashing a Light Entity does not clear Panda's registered light.
+        # Keep registration stable and switch its contribution to zero instead.
+        self.flashlight_light.world_position = camera.world_position
+        self.flashlight_light.world_rotation = camera.world_rotation
+        self.flashlight_light.color = (
+            color.rgb(0.95, 0.90, 0.78) if enabled else color.rgb(0, 0, 0)
+        )

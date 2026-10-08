@@ -11,13 +11,14 @@ class EndScreen(Entity):
         self.background = Entity(
             parent=self,
             model="quad",
-            color=color.rgba(
+            color=color.rgba32(
                 0,
                 0,
                 0,
                 220,
             ),
-            scale=2,
+            scale=(camera.aspect_ratio, 1),
+            z=0.1,
         )
 
         self.title_text = Text(

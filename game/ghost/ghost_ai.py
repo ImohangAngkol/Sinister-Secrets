@@ -1,6 +1,7 @@
 import random
 
 from ursina import (
+    Vec3,
     distance_xz,
     time,
 )
@@ -20,6 +21,7 @@ from game.ghost.ghost_states import (
 
 from game.ghost.ghost_vision import (
     can_see_player,
+    has_line_of_sight,
 )
 
 from game.settings import (
@@ -42,6 +44,7 @@ class GhostAI:
         graph,
         hud,
         jumpscare,
+        collision_root=None,
     ):
 
         # =========================
@@ -52,11 +55,7 @@ class GhostAI:
 
         self.player = player
 
-        # IMPORTANT:
-        # Do NOT call this self.nodes.
-        #
-        # Panda3D/Ursina already uses
-        # the name "nodes".
+        # Match House.nav_nodes without shadowing the Entity's Panda3D API.
         self.nav_nodes = nav_nodes
 
         self.graph = graph
@@ -79,6 +78,8 @@ class GhostAI:
             ghost=ghost,
             nodes=nav_nodes,
             graph=graph,
+            collision_root=collision_root,
+            player=player,
         )
 
         # =========================
@@ -86,6 +87,8 @@ class GhostAI:
         # =========================
 
         self.last_known_player_node = None
+        self.last_known_player_position = None
+        self.repath_time = 0.0
 
         # =========================
         # TIMERS
@@ -112,6 +115,7 @@ class GhostAI:
         # Stop AI after jumpscare.
         if self.state == GhostState.JUMPSCARE:
             return
+        self.repath_time = max(0, self.repath_time - time.dt)
 
         # ======================================
         # GHOST SENSES
@@ -140,6 +144,7 @@ class GhostAI:
             self.state == GhostState.CHASE
             and player_distance
             <= GHOST_CATCH_DISTANCE
+            and has_line_of_sight(self.ghost, self.player)
         ):
 
             self._catch_player()
@@ -151,6 +156,7 @@ class GhostAI:
         # ======================================
 
         if sees_player:
+            self.last_known_player_position = Vec3(self.player.world_position)
 
             self.last_known_player_node = (
                 nearest_node(
@@ -182,8 +188,8 @@ class GhostAI:
                 is not None
             ):
 
-                self.navigation.set_path_to_node(
-                    self.last_known_player_node
+                self.navigation.set_path_to_position(
+                    self.last_known_player_position
                 )
 
             # After a while, stop chasing
@@ -211,9 +217,11 @@ class GhostAI:
             in (
                 GhostState.PATROL,
                 GhostState.SEARCH,
+                GhostState.INVESTIGATE,
             )
         ):
 
+            self.last_known_player_position = Vec3(self.player.world_position)
             self.last_known_player_node = (
                 nearest_node(
                     self.player.position,
@@ -221,9 +229,9 @@ class GhostAI:
                 )
             )
 
-            self.navigation.set_path_to_node(
-                self.last_known_player_node
-            )
+            if self.repath_time <= 0:
+                self.navigation.set_path_to_position(self.last_known_player_position)
+                self.repath_time = 0.3
 
             self._set_state(
                 GhostState.INVESTIGATE
@@ -289,10 +297,14 @@ class GhostAI:
             # If the ghost can physically
             # see the player, chase directly.
             if sees_player:
-
-                self.navigation.clear()
-
-                self._move_directly_toward_player()
+                if self.navigation.segment_clear(self.ghost.world_position, self.player.world_position):
+                    self.navigation.clear()
+                    self._move_directly_toward_player()
+                else:
+                    if self.repath_time <= 0 or self.navigation.path_finished():
+                        self.navigation.set_path_to_position(self.player.world_position)
+                        self.repath_time = 0.3
+                    self.navigation.follow_path(GHOST_CHASE_SPEED)
 
             # Otherwise use the waypoint path.
             else:
@@ -331,16 +343,7 @@ class GhostAI:
         self,
     ):
 
-        self.ghost.look_at_2d(
-            self.player.position,
-            "y",
-        )
-
-        self.ghost.position += (
-            self.ghost.forward
-            * GHOST_CHASE_SPEED
-            * time.dt
-        )
+        self.navigation.move_toward(self.player.world_position, GHOST_CHASE_SPEED)
 
     # ==========================================
     # RANDOM PATROL

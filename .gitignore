@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .vscode/
 .idea/
+
+# Generated rendering verification, not game assets.
+game/tests/render_*.png
