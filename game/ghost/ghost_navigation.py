@@ -57,6 +57,9 @@ class GhostNavigation:
         self.path_index = 0
         self.final_target = None
         self.blocked = False
+        self.stuck_time = 0.0
+        self.target_node = None
+        self.target_position = None
 
     def segment_clear(self, start, target):
         """Sweep the ghost's width at feet and eye height against world colliders."""
@@ -86,42 +89,58 @@ class GhostNavigation:
 
     def set_path_to_node(self, target_node):
         self.clear()
-        start_node = self._reachable_node(self.ghost.world_position)
-        if start_node is None or target_node not in self.nav_nodes:
+        self.target_node = target_node
+        if target_node not in self.nav_nodes:
             self.blocked = True
-            return
+            return False
         # Validate graph edges against actual geometry, including closed doors.
         safe_graph = {
             node: [other for other in neighbors if other in self.nav_nodes
                    and self.segment_clear(self.nav_nodes[node], self.nav_nodes[other])]
             for node, neighbors in self.graph.items() if node in self.nav_nodes
         }
-        route = astar(start_node, target_node, self.nav_nodes, safe_graph)
-        if start_node != target_node and not route:
+        candidates = []
+        for start_node in self.nav_nodes:
+            if not self.segment_clear(self.ghost.world_position, self.nav_nodes[start_node]):
+                continue
+            route = astar(start_node, target_node, self.nav_nodes, safe_graph)
+            if start_node != target_node and not route:
+                continue
+            path = [start_node] + route
+            cost = _distance(self.ghost.world_position, self.nav_nodes[start_node])
+            cost += sum(_distance(self.nav_nodes[a], self.nav_nodes[b])
+                        for a, b in zip(path, path[1:]))
+            candidates.append((cost, path))
+        if not candidates:
             self.blocked = True
-            return
+            return False
         # Include the entry node: omitting it cuts corners from off-graph positions.
-        self.path = [start_node] + route
+        self.path = min(candidates, key=lambda candidate: candidate[0])[1]
         # Frequent chase/hearing replans must not send the ghost back to a node
         # behind it. Skip entry nodes only when the entire shortcut is clear.
         while len(self.path) > 1 and self.segment_clear(
                 self.ghost.world_position, self.nav_nodes[self.path[1]]):
             self.path.pop(0)
+        return True
 
     def set_path_to_position(self, position):
         target = Vec3(position.x, self.ghost.world_y, position.z)
         if self.segment_clear(self.ghost.world_position, target):
             self.clear()
             self.final_target = target
-            return
+            self.target_position = target
+            return True
         target_node = self._reachable_node(target)
         if target_node is None:
             self.clear()
             self.blocked = True
-            return
+            self.target_position = target
+            return False
         self.set_path_to_node(target_node)
+        self.target_position = target
         if not self.blocked:
             self.final_target = target
+        return not self.blocked
 
     def path_finished(self):
         return self.path_index >= len(self.path) and self.final_target is None
@@ -131,35 +150,58 @@ class GhostNavigation:
         self.path_index = 0
         self.final_target = None
         self.blocked = False
+        self.stuck_time = 0.0
+        self.target_node = None
+        self.target_position = None
 
-    def move_toward(self, target, speed):
+    def replan(self):
+        target_position = self.target_position
+        target_node = self.target_node
+        if target_position is not None:
+            return self.set_path_to_position(target_position)
+        if target_node is not None:
+            return self.set_path_to_node(target_node)
+        return False
+
+    def move_toward(self, target, speed, dt=None):
         start = self.ghost.world_position
         target = Vec3(target.x, start.y, target.z)
         delta = target - start
         length = delta.length()
         if length < 0.001:
             return True
-        step = min(length, speed * min(max(time.dt, 0), 0.1))
-        destination = start + delta / length * step
+        frame_dt = max(time.dt if dt is None else dt, 0)
+        remaining = min(length, speed * frame_dt)
         self.ghost.look_at_2d(target, "y")
-        if not self.segment_clear(start, destination):
-            self.blocked = True
-            return False
-        self.ghost.world_position = destination
+        while remaining > 1e-9:
+            position = self.ghost.world_position
+            step = min(remaining, speed / 60)
+            destination = position + delta / length * step
+            if not self.segment_clear(position, destination):
+                self.blocked = True
+                self.stuck_time += frame_dt
+                return False
+            self.ghost.world_position = destination
+            remaining -= step
         self.blocked = False
+        self.stuck_time = 0.0
         return True
 
     def follow_path(self, speed):
-        if self.path_finished():
-            return
-        if self.path_index < len(self.path):
-            target = self.nav_nodes[self.path[self.path_index]]
-        else:
-            target = self.final_target
-        if _distance(self.ghost.world_position, target) < 0.05:
+        remaining = max(time.dt, 0)
+        while remaining > 1e-9 and not self.path_finished():
             if self.path_index < len(self.path):
-                self.path_index += 1
+                target = self.nav_nodes[self.path[self.path_index]]
             else:
-                self.final_target = None
-            return
-        self.move_toward(target, speed)
+                target = self.final_target
+            length = _distance(self.ghost.world_position, target)
+            if length < 0.001:
+                if self.path_index < len(self.path):
+                    self.path_index += 1
+                else:
+                    self.final_target = None
+                continue
+            duration = min(remaining, length / speed)
+            if not self.move_toward(target, speed, dt=duration):
+                return
+            remaining -= duration

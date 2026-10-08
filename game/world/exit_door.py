@@ -23,11 +23,12 @@ class ExitDoor(LockedDoor):
 
     def interact(self, player):
         super().interact(player)
-        if self.opened:
+        if self.opened or self.opening:
             self.escape_player = player
             player.hud.show_message("Exit unlocked. Walk through the doorway to escape.")
 
     def update(self):
+        super().update()
         if not self.opened or self.escape_player is None or self.escape_triggered:
             return
         player = self.escape_player

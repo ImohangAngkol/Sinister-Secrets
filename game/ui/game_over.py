@@ -45,3 +45,6 @@ class EndScreen(Entity):
         self.enabled = True
         self.title_text.text = title
         self.subtitle_text.text = subtitle
+
+    def resize(self, aspect):
+        self.background.scale = (aspect, 1)

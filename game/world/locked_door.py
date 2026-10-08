@@ -18,7 +18,7 @@ class LockedDoor(Door):
         super().__init__(**kwargs)
 
     def interact(self, player):
-        if self.opened:
+        if self.opened or self.opening:
             return
 
         if not player.inventory.has_key(

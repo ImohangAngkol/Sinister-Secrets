@@ -55,6 +55,9 @@ class HorrorPlayer(FirstPersonController):
 
         self.has_flashlight = False
         self.flashlight_on = False
+        self._flicker_active = False
+        self._flicker_dark = False
+        self._flicker_remaining = 0.0
 
         # Make sure the ghost's vision ray can hit the player.
         self.collider = BoxCollider(
@@ -94,30 +97,39 @@ class HorrorPlayer(FirstPersonController):
 
         if sprinting:
             self.speed = PLAYER_SPRINT_SPEED
-            self.stats.noise_level = 8
 
         elif moving:
             self.speed = PLAYER_SPEED
-            self.stats.noise_level = 3
 
         else:
             self.speed = PLAYER_SPEED
-            self.stats.noise_level = 0
 
         # Ursina's controller uses short rays. Substeps prevent sprinting through
         # thin walls during a slow frame; apply mouse movement only once.
         frame_dt = time.dt
         velocity = mouse.velocity
-        remaining = min(max(frame_dt, 0), 0.1)
+        remaining = max(frame_dt, 0)
+        horizontal_distance = 0.0
         try:
-            while remaining > 0:
-                time.dt = min(remaining, 1 / 60)
+            while remaining > 1e-9:
+                # Keep the maximum sprint step below the controller ray's
+                # clearance margin, including diagonal movement and corners.
+                time.dt = min(remaining, 1 / 240)
+                before = self.world_position
                 super().update()
+                after = self.world_position
+                horizontal_distance += ((after.x - before.x) ** 2
+                                        + (after.z - before.z) ** 2) ** 0.5
                 remaining -= time.dt
                 mouse.velocity = Vec3(0, 0, 0)
         finally:
             time.dt = frame_dt
             mouse.velocity = velocity
+
+        actual_speed = horizontal_distance / frame_dt if frame_dt > 0 else 0
+        self.stats.noise_level = (8 if sprinting else 3) * min(actual_speed / self.speed, 1)
+        if actual_speed < 0.01:
+            self.stats.noise_level = 0
 
         self.camera_controller.update()
         self._update_flashlight()
@@ -166,11 +178,17 @@ class HorrorPlayer(FirstPersonController):
         self.flashlight_on = (
             not self.flashlight_on
         )
+        self._flicker_active = False
 
         self._set_flashlight_light(self.flashlight_on)
         self.hud.refresh_inventory(self)
 
     def add_battery(self, amount: float):
+        if self.stats.battery >= MAX_BATTERY:
+            self.hud.show_message("Flashlight battery is already full. Leave this battery for later.")
+            return False
+        if amount <= 0:
+            return False
         self.stats.battery = min(
             MAX_BATTERY,
             self.stats.battery + amount,
@@ -182,8 +200,10 @@ class HorrorPlayer(FirstPersonController):
         )
 
         self.hud.refresh_inventory(self)
+        return True
 
     def _update_flashlight(self):
+        frame_dt = max(time.dt, 0)
         if (
             self.flashlight_on
             and self.stats.battery > 0
@@ -192,7 +212,7 @@ class HorrorPlayer(FirstPersonController):
                 0,
                 self.stats.battery
                 - FLASHLIGHT_DRAIN_PER_SECOND
-                * time.dt,
+                * frame_dt,
             )
 
             self.flashlight_light.world_position = (
@@ -201,15 +221,26 @@ class HorrorPlayer(FirstPersonController):
 
             self.flashlight_light.world_rotation = camera.world_rotation
 
-            # Small flicker at low battery.
-            if (
-                self.stats.battery
-                < LOW_BATTERY_THRESHOLD
-                and random.random() < 0.08
-            ):
-                self._set_flashlight_light(False)
-
+            # Alternating intervals measured in seconds, carrying overshoot
+            # across frames. RNG calls depend on elapsed time, not FPS.
+            if 0 < self.stats.battery < LOW_BATTERY_THRESHOLD:
+                if not self._flicker_active:
+                    self._flicker_active = True
+                    self._flicker_dark = False
+                    self._flicker_remaining = random.uniform(0.35, 0.9)
+                    low_dt = min(frame_dt, (LOW_BATTERY_THRESHOLD - self.stats.battery)
+                                 / FLASHLIGHT_DRAIN_PER_SECOND)
+                else:
+                    low_dt = frame_dt
+                self._flicker_remaining -= low_dt
+                while self._flicker_remaining <= 1e-9:
+                    self._flicker_dark = not self._flicker_dark
+                    self._flicker_remaining += (random.uniform(0.06, 0.12)
+                                               if self._flicker_dark
+                                               else random.uniform(0.35, 0.9))
+                self._set_flashlight_light(not self._flicker_dark)
             else:
+                self._flicker_active = False
                 self._set_flashlight_light(True)
 
             if self.stats.battery <= 0:
@@ -222,6 +253,7 @@ class HorrorPlayer(FirstPersonController):
 
         else:
             self.flashlight_on = False
+            self._flicker_active = False
             self._set_flashlight_light(False)
 
         self.hud.refresh_inventory(self)

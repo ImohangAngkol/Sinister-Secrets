@@ -2,6 +2,7 @@ from game.ghost.ghost import Ghost
 from game.player.player import HorrorPlayer
 from game.world.house import House
 from game.world.environment import create_environment
+from ursina import application, camera, destroy, scene
 
 
 class SceneManager:
@@ -47,3 +48,19 @@ class SceneManager:
 
         self.player.enabled = False
         self.ghost.enabled = False
+
+    def dispose(self):
+        self.stop_gameplay()
+        camera.world_parent = scene
+        for light in (*self.lights, self.player.flashlight_light):
+            application.base.render.clear_light(light.get_children()[0])
+        roots = (self.house, self.ghost, self.player)
+        entities = [entity for entity in scene.entities
+                    if not entity.is_empty() and any(
+                        entity == root or entity.has_ancestor(root) for root in roots)]
+        # Children must be removed before their roots in Ursina 8.3. Keep the
+        # loose cursor alive until the player's on_destroy/on_disable finishes.
+        for entity in sorted(entities, key=lambda entity: entity.get_num_nodes(), reverse=True):
+            destroy(entity)
+        destroy(self.player.cursor)
+        destroy(self.player.flashlight_light)

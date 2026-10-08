@@ -89,6 +89,7 @@ class GhostAI:
         self.last_known_player_node = None
         self.last_known_player_position = None
         self.repath_time = 0.0
+        self.recovery_time = 0.0
 
         # =========================
         # TIMERS
@@ -116,6 +117,7 @@ class GhostAI:
         if self.state == GhostState.JUMPSCARE:
             return
         self.repath_time = max(0, self.repath_time - time.dt)
+        self.recovery_time = max(0, self.recovery_time - time.dt)
 
         # ======================================
         # GHOST SENSES
@@ -130,6 +132,8 @@ class GhostAI:
             self.ghost,
             self.player,
         )
+        if self.recovery_time > 0:
+            sees_player = hears_player = False
 
         # ======================================
         # CHECK IF GHOST CAUGHT PLAYER
@@ -244,6 +248,10 @@ class GhostAI:
         self._run_state(
             sees_player
         )
+        if (self.state in (GhostState.PATROL, GhostState.INVESTIGATE, GhostState.CHASE)
+                and self.navigation.stuck_time >= 0.5):
+            if not self.navigation.replan():
+                self._recover_without_route()
 
     # ==========================================
     # STATE BEHAVIOR
@@ -273,6 +281,9 @@ class GhostAI:
         # ======================================
 
         elif self.state == GhostState.INVESTIGATE:
+            if self.navigation.blocked and self.navigation.path_finished():
+                self._recover_without_route()
+                return
 
             self.navigation.follow_path(
                 GHOST_INVESTIGATE_SPEED
@@ -302,13 +313,17 @@ class GhostAI:
                     self._move_directly_toward_player()
                 else:
                     if self.repath_time <= 0 or self.navigation.path_finished():
-                        self.navigation.set_path_to_position(self.player.world_position)
+                        if not self.navigation.set_path_to_position(self.player.world_position):
+                            self._recover_without_route()
+                            return
                         self.repath_time = 0.3
                     self.navigation.follow_path(GHOST_CHASE_SPEED)
 
             # Otherwise use the waypoint path.
             else:
-
+                if self.navigation.blocked and self.navigation.path_finished():
+                    self._recover_without_route()
+                    return
                 self.navigation.follow_path(
                     GHOST_CHASE_SPEED
                 )
@@ -344,6 +359,7 @@ class GhostAI:
     ):
 
         self.navigation.move_toward(self.player.world_position, GHOST_CHASE_SPEED)
+        self.navigation.target_position = Vec3(self.player.world_position)
 
     # ==========================================
     # RANDOM PATROL
@@ -371,19 +387,25 @@ class GhostAI:
         ]
 
         if not available_nodes:
-
-            self.navigation.clear()
-
+            self._recover_without_route()
             return
 
         # Pick random destination.
-        target_node = random.choice(
-            available_nodes
-        )
+        random.shuffle(available_nodes)
+        for target_node in available_nodes:
+            if self.navigation.set_path_to_node(target_node):
+                return
+        self._recover_without_route()
 
-        self.navigation.set_path_to_node(
-            target_node
-        )
+    def _recover_without_route(self):
+        # Search safely in place, then try patrol again after a bounded delay.
+        # A short sensing cooldown avoids immediately retrying an unreachable
+        # noise source every frame; all five original states remain intact.
+        self.navigation.clear()
+        self._set_state(GhostState.SEARCH)
+        self.search_time = GHOST_SEARCH_SECONDS
+        self.recovery_time = GHOST_SEARCH_SECONDS
+        self.repath_time = GHOST_SEARCH_SECONDS
 
     # ==========================================
     # CHANGE STATE

@@ -4,16 +4,17 @@ Run: .venv/Scripts/python.exe -m unittest discover -s game/tests -v
 Mouse capture is bypassed ONLY here because GraphicsBuffer has no window pointer.
 """
 import importlib
+import random
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from panda3d.core import Filename, loadPrcFileData
+from panda3d.core import Filename, LightAttrib, loadPrcFileData
 
 loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 
 from PIL import Image, ImageStat
-from ursina import Ursina, Vec3, application, camera, destroy, held_keys, mouse, scene, time
+from ursina import Entity, Ursina, Vec3, application, camera, destroy, held_keys, mouse, scene, time
 
 from game.game_manager import GameManager
 from game.ghost.ghost_navigation import astar
@@ -25,6 +26,7 @@ from game.items.flashlight import FlashlightPickup
 from game.items.key import KeyPickup
 from game.player.interaction import get_interaction_hit
 from game.settings import FLASHLIGHT_DRAIN_PER_SECOND, MAX_BATTERY
+from game.ghost.ghost_navigation import GhostNavigation
 
 
 class PrototypeTests(unittest.TestCase):
@@ -54,6 +56,8 @@ class PrototypeTests(unittest.TestCase):
         scene.entities = [e for e in scene.entities if e.eternal]
         scene._entities_marked_for_removal.clear()
         application.sequences.clear()
+        application.paused = False
+        mouse.enabled = False
         self.app.render.clear_light()
         held_keys.clear()
         mouse.velocity = Vec3(0, 0, 0)
@@ -196,10 +200,16 @@ class PrototypeTests(unittest.TestCase):
         self.player.inventory.add_key("exit_key")
         self.aim(Vec3(10, 1.5, 14.75))
         self.player.input("e")
-        self.assertTrue(door.opened)
-        self.assertIsNone(door.collider)
+        self.assertTrue(door.opening)
+        self.assertFalse(door.opened)
+        self.assertIsNotNone(door.collider)
         door.update()
         self.assertEqual(self.manager.state, "playing")
+        for _ in range(48):
+            time.dt = 1 / 60
+            door.update()
+        self.assertTrue(door.opened)
+        self.assertIsNone(door.collider)
         self.player.rotation_y = 0
         camera.rotation = Vec3(0, 0, 0)
         self.move("w", seconds=0.4)
@@ -316,6 +326,263 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(self.player.flashlight_light.color.r, 0)
         self.ghost.jumpscare.trigger()
         self.capture("render_caught.png")
+
+    def test_movement_speed_noise_and_collisions_at_four_frame_rates(self):
+        for fps in (4, 30, 60, 120):
+            for sprinting, speed, noise in ((False, 5, 3), (True, 8, 8)):
+                with self.subTest(fps=fps, sprinting=sprinting):
+                    self.player.position = Vec3(-10, 0, -10)
+                    self.player.rotation_y = 0
+                    held_keys["shift"] = int(sprinting)
+                    self.move("w", seconds=1, dt=1 / fps)
+                    self.assertAlmostEqual(self.player.z, -10 + speed, delta=0.002)
+                    self.assertAlmostEqual(self.player.stats.noise_level, noise, delta=0.002)
+                    self.player.position = Vec3(-0.68, 0, -9)
+                    self.player.rotation_y = 90
+                    self.move("w", seconds=1, dt=1 / fps)
+                    self.assertAlmostEqual(self.player.x, -0.68, delta=0.001)
+                    self.assertEqual(self.player.stats.noise_level, 0)
+                    self.player.position = Vec3(-1.5, 0, -9)
+                    self.move("w", seconds=1, dt=1 / fps)
+                    # Wall face -0.2 minus the player's 0.325 half-width.
+                    self.assertLessEqual(self.player.x, -0.525)
+                    self.assertAlmostEqual(self.player.y, 0, delta=0.001)
+                    self.player.position = Vec3(-14, 0, -14)
+                    self.player.rotation_y = -135
+                    self.move("w", seconds=1, dt=1 / fps)
+                    self.assertGreater(self.player.x, -14.34)
+                    self.assertGreater(self.player.z, -14.34)
+        held_keys.clear()
+        held_keys["w"] = held_keys["s"] = held_keys["shift"] = 1
+        self.player.update()
+        self.assertEqual(self.player.stats.noise_level, 0)
+
+    def test_flashlight_drain_and_flicker_timeline_at_four_frame_rates(self):
+        reference = None
+        for fps in (4, 30, 60, 120):
+            self.player.has_flashlight = True
+            self.player.flashlight_on = True
+            self.player.stats.battery = 14
+            self.player._flicker_active = False
+            seeded = random.Random(81)
+            samples = []
+            with patch("game.player.player.random.uniform", side_effect=seeded.uniform) as uniform:
+                for frame in range(2 * fps):
+                    time.dt = 1 / fps
+                    self.player._update_flashlight()
+                    if (frame + 1) % (fps // 2) == 0:
+                        samples.append(self.player._flicker_dark)
+                result = (samples, uniform.call_count, self.player._flicker_dark)
+            self.assertAlmostEqual(self.player.stats.battery, 7, delta=0.00001)
+            if reference is None:
+                reference = result
+                remaining = self.player._flicker_remaining
+            self.assertEqual(result, reference)
+            self.assertAlmostEqual(self.player._flicker_remaining, remaining, delta=0.00001)
+
+    def test_full_charge_battery_remains_until_successful_interaction(self):
+        pickup = self.pickup(BatteryPickup)
+        self.player.position = Vec3(-10, 0, 7)
+        self.aim(pickup.world_position)
+        self.player.stats.battery = MAX_BATTERY
+        self.player.input("e")
+        self.assertIn(pickup, self.house.children)
+        self.assertIn(pickup, scene.collidables)
+        self.assertIn("already full", self.manager.hud.message.text)
+        self.player.stats.battery = 90
+        self.player.input("e")
+        self.assertEqual(self.player.stats.battery, MAX_BATTERY)
+        self.assertNotIn(pickup, scene.collidables)
+
+    def test_door_blocks_player_and_ghost_until_animation_completes(self):
+        door = self.house.exit_door
+        self.player.position = Vec3(10, 0, 13)
+        self.player.rotation_y = 0
+        self.player.inventory.add_key("exit_key")
+        self.ghost.position = Vec3(10, 0, 13)
+        door.interact(self.player)
+        blocker = door.doorway_blocker
+        for frame in range(7):
+            time.dt = 0.1
+            door.update()
+            elapsed = door.opening_time
+            door.interact(self.player)
+            self.assertEqual(door.opening_time, elapsed)
+            self.assertIs(door.doorway_blocker, blocker)
+            self.assertFalse(door.opened)
+            self.assertFalse(self.ghost.ai.navigation.segment_clear(Vec3(10, 0, 13), Vec3(10, 0, 16)))
+            self.move("w", seconds=0.1, dt=0.1)
+            self.assertLess(self.player.z, 14.2)
+        time.dt = 0.1
+        door.update()
+        self.assertTrue(door.opened)
+        self.assertIsNone(door.collider)
+        self.assertNotIn(blocker, scene.collidables)
+        self.assertTrue(self.ghost.ai.navigation.segment_clear(Vec3(10, 0, 13), Vec3(10, 0, 16)))
+
+    def test_navigation_replans_an_alternate_valid_route(self):
+        # Isolated test geometry inside a clear quadrant; the existing house
+        # and graph are preserved. An added collider invalidates the short edge.
+        root = Entity()
+        self.ghost.position = Vec3(-10, 0, -10)
+        nodes = {0: Vec3(-10, 0, -10), 1: Vec3(-4, 0, -10),
+                 2: Vec3(-10, 0, -5), 3: Vec3(-4, 0, -5)}
+        graph = {0: [1, 2], 1: [0, 3], 2: [0, 3], 3: [1, 2]}
+        nav = GhostNavigation(self.ghost, nodes, graph, collision_root=root, player=self.player)
+        self.ghost.ai.navigation = nav
+        self.ghost.ai.nav_nodes = nodes
+        self.ghost.ai.graph = graph
+        nav.set_path_to_node(1)
+        Entity(parent=root, model="cube", collider="box", position=(-7, 1.5, -10), scale=(0.4, 3, 3))
+        with patch("game.ghost.ghost_ai.can_see_player", return_value=False), \
+                patch("game.ghost.ghost_ai.can_hear_player", return_value=False):
+            for _ in range(600):
+                time.dt = 1 / 60
+                self.ghost.ai.update()
+                self.assertFalse(-7.6 < self.ghost.x < -6.4 and self.ghost.z < -8.5)
+                if (self.ghost.position - nodes[1]).length() < 0.1:
+                    break
+        self.assertLess((self.ghost.position - nodes[1]).length(), 0.1)
+
+    def test_unreachable_route_searches_then_resumes_after_obstacle_removed(self):
+        root = Entity()
+        self.ghost.position = Vec3(-10, 0, -10)
+        nodes = {0: Vec3(-10, 0, -10), 1: Vec3(-4, 0, -10)}
+        graph = {0: [1], 1: [0]}
+        nav = GhostNavigation(self.ghost, nodes, graph, collision_root=root, player=self.player)
+        ai = self.ghost.ai
+        ai.navigation, ai.nav_nodes, ai.graph = nav, nodes, graph
+        nav.set_path_to_node(1)
+        blocker = Entity(parent=root, model="cube", collider="box", position=(-7, 1.5, -10), scale=(0.4, 3, 20))
+        with patch("game.ghost.ghost_ai.can_see_player", return_value=False), \
+                patch("game.ghost.ghost_ai.can_hear_player", return_value=False):
+            for _ in range(180):
+                time.dt = 1 / 60
+                ai.update()
+            self.assertEqual(ai.state, GhostState.SEARCH)
+            self.assertGreater(ai.search_time, 0)
+            self.assertLess(self.ghost.x, -7.6)
+            destroy(blocker)
+            furthest_x = self.ghost.x
+            for _ in range(420):
+                ai.update()
+                furthest_x = max(furthest_x, self.ghost.x)
+            self.assertEqual(ai.state, GhostState.PATROL)
+            self.assertGreater(furthest_x, -4.1)
+
+    def test_unreachable_chase_and_noise_target_enter_bounded_recovery(self):
+        root = Entity()
+        nodes = {0: Vec3(-10, 0, -10), 1: Vec3(-4, 0, -10)}
+        graph = {0: [1], 1: [0]}
+        Entity(parent=root, model="cube", collider="box",
+               position=(-7, 1.5, -10), scale=(0.4, 3, 20))
+        self.player.position = nodes[1]
+        ai = self.ghost.ai
+        for sees_player in (False, True):
+            with self.subTest(sees_player=sees_player):
+                self.ghost.position = nodes[0]
+                ai.navigation = GhostNavigation(self.ghost, nodes, graph,
+                                                collision_root=root, player=self.player)
+                ai.nav_nodes, ai.graph = nodes, graph
+                ai.state = GhostState.PATROL
+                ai.repath_time = ai.recovery_time = 0
+                with patch("game.ghost.ghost_ai.can_see_player", return_value=sees_player), \
+                        patch("game.ghost.ghost_ai.can_hear_player", return_value=True):
+                    time.dt = 0.1
+                    ai.update()
+                    self.assertEqual(ai.state, GhostState.SEARCH)
+                    self.assertEqual(ai.recovery_time, 4)
+                    for _ in range(10):
+                        ai.update()
+                    self.assertEqual(ai.state, GhostState.SEARCH)
+                    self.assertAlmostEqual(ai.recovery_time, 3)
+                    self.assertEqual(self.ghost.position, nodes[0])
+
+    def test_ghost_speed_and_waypoint_budget_at_four_frame_rates(self):
+        root = Entity()
+        nodes = {0: Vec3(-10, 0, -10), 1: Vec3(-10, 0, -9.5),
+                 2: Vec3(-10, 0, -4)}
+        for fps in (4, 30, 60, 120):
+            for speed in (2.1, 2.6, 4.2):
+                with self.subTest(fps=fps, speed=speed):
+                    self.ghost.position = nodes[0]
+                    nav = GhostNavigation(self.ghost, nodes, {0: [1], 1: [2]},
+                                          collision_root=root, player=self.player)
+                    nav.path = [1, 2]
+                    for _ in range(fps):
+                        time.dt = 1 / fps
+                        nav.follow_path(speed)
+                    self.assertAlmostEqual(self.ghost.z, -10 + speed, delta=0.003)
+
+    def test_door_animation_duration_at_four_frame_rates(self):
+        from game.world.door import Door
+
+        for fps in (4, 30, 60, 120):
+            with self.subTest(fps=fps):
+                door = Door(position=(-12, 0, -6), scale=(1, 2, 0.3))
+                door.open()
+                for frame in range(fps):
+                    time.dt = 1 / fps
+                    door.update()
+                    if (frame + 1) / fps < 0.8 - 1e-9:
+                        self.assertTrue(door.opening)
+                        self.assertFalse(door.opened)
+                        self.assertIsNotNone(door.collider)
+                    else:
+                        self.assertTrue(door.opened)
+                        self.assertFalse(door.opening)
+                        self.assertIsNone(door.collider)
+                        self.assertAlmostEqual(door.rotation_y, 100)
+                destroy(door)
+
+    def test_restarts_after_win_and_loss_do_not_leak_entities_lights_or_timers(self):
+        def flush_removed():
+            scene.entities[:] = [e for e in scene.entities if e not in scene._entities_marked_for_removal]
+            scene._entities_marked_for_removal.clear()
+        flush_removed()
+        baseline = (len(scene.entities), len(scene.collidables), len(application.sequences))
+        for turn in range(12):
+            old_player = self.manager.scene_manager.player
+            old_house = self.manager.scene_manager.house
+            self.manager.scene_manager.house.exit_door.open()
+            (self.manager.win_game if turn % 2 else self.manager.game_over)()
+            self.manager.input("r")
+            flush_removed()
+            self.assertTrue(old_player.is_empty())
+            self.assertTrue(old_house.is_empty())
+            self.assertEqual(self.manager.state, "playing")
+            player = self.manager.scene_manager.player
+            self.assertTrue(player.enabled)
+            self.assertFalse(player.has_flashlight)
+            self.assertEqual(player.inventory.key_count(), 0)
+            self.assertEqual((len(scene.entities), len(scene.collidables), len(application.sequences)), baseline)
+            lights = self.app.render.get_state().get_attrib(LightAttrib)
+            self.assertEqual(lights.get_num_on_lights(), 3)
+
+    def test_focus_loss_pauses_clears_input_and_releases_capture(self):
+        held_keys["w"] = held_keys["shift"] = 1
+        mouse.velocity = Vec3(1, 1, 0)
+        self.manager.set_focus(False)
+        self.assertTrue(application.paused)
+        self.assertFalse(mouse.locked)
+        self.assertFalse(any(held_keys.values()))
+        self.assertEqual(mouse.velocity, Vec3(0, 0, 0))
+        self.manager.set_focus(True)
+        self.assertFalse(application.paused)
+        self.assertTrue(mouse.locked)
+        self.manager.game_over()
+        self.manager.set_focus(False)
+        self.manager.set_focus(True)
+        self.assertFalse(mouse.locked)
+
+    def test_hud_resizes_and_end_overlay_covers_four_three_and_widescreen(self):
+        for aspect in (4 / 3, 16 / 9):
+            self.manager.hud.layout(aspect)
+            self.manager.end_screen.resize(aspect)
+            self.assertAlmostEqual(self.manager.hud.inventory_ui.x, -aspect / 2 + 0.03)
+            self.assertAlmostEqual(self.manager.hud.ghost_state.x, aspect / 2 - 0.03)
+            self.assertAlmostEqual(self.manager.end_screen.background.scale_x, aspect)
+        self.assertTrue(self.manager.hud.inventory_ui.has_ancestor(self.manager.hud))
 
     def test_render_visibility_colors_and_flashlight_changes_pixels(self):
         self.capture("render_spawn.png")

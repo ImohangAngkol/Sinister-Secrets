@@ -22,8 +22,9 @@ class BatteryPickup(Item):
         )
 
     def interact(self, player):
-        player.add_battery(
+        used = player.add_battery(
             self.amount
         )
 
-        destroy(self)
+        if used:
+            destroy(self)
