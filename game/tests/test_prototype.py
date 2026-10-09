@@ -31,6 +31,7 @@ from game.settings import (FLASHLIGHT_COLOR, FLASHLIGHT_DRAIN_PER_SECOND, FLASHL
                            GHOST_ACTIVE_SEARCH_SECONDS, STAMINA_MAX)
 from game.ghost.ghost_navigation import GhostNavigation
 from game.world.environment import world_raycast
+from game.systems.horror_manager import HorrorManager, EVENTS, descendants
 
 
 class PrototypeTests(unittest.TestCase):
@@ -91,6 +92,354 @@ class PrototypeTests(unittest.TestCase):
         self.player.progression.install_fuse()
         self.player.progression.try_combination(self.house.level.house["progression"]["combination"])
         self.player.progression.remove_boards()
+
+    def finish_jumpscare(self):
+        """Legacy terminal-state assertions now wait for the staged encounter."""
+        self.assertEqual(self.manager.state,'jumpscare')
+        self.ghost.jumpscare.update(self.ghost.jumpscare.duration)
+
+    def prepare_horror(self, room='main_hall'):
+        self.player.obtain_flashlight()
+        self.player.position = Vec3(self.house.nav_nodes[room])
+        self.player.rotation_y = self.player.camera_pivot.rotation_x = 0
+        camera.rotation = Vec3(0,0,0)
+        horror = self.manager.scene_manager.horror
+        horror.next_allowed = 0
+        horror.director.tension = .5
+        return horror
+
+    def test_horror_event_cooldown_and_single_active_effect(self):
+        horror = self.prepare_horror()
+        self.assertTrue(horror.start_event('power_dip'))
+        self.assertFalse(horror.start_event('room_dimming'))
+        horror.update(4)
+        self.assertIsNone(horror.active)
+        self.assertGreaterEqual(horror.next_allowed-horror.clock,28)
+        self.assertFalse(horror.start_event('power_dip'))
+        horror.clock = horror.next_allowed
+        self.assertTrue(horror.start_event('power_dip'))
+        horror.stop()
+
+    def test_horror_seeded_schedule_is_reproducible_and_independent_of_global_rng(self):
+        self.prepare_horror()
+        traces=[]
+        for global_seed in (10,999):
+            random.seed(global_seed)
+            horror = HorrorManager(self.house,self.player,self.ghost,self.manager.scene_manager.lights,seed=1729)
+            for _ in range(1800): horror.update(.25)
+            traces.append(list(horror.history))
+            horror.stop()
+        self.assertEqual(traces[0],traces[1])
+        self.assertGreaterEqual(len(traces[0]),3)
+        self.assertGreaterEqual(traces[0][0][0],30)
+
+    def test_horror_scheduling_is_identical_at_four_frame_rates(self):
+        self.prepare_horror()
+        traces=[]
+        for fps in (4,30,60,120):
+            horror=HorrorManager(self.house,self.player,self.ghost,self.manager.scene_manager.lights,seed=94,frequency=2)
+            for _ in range(180*fps): horror.update(1/fps)
+            traces.append(list(horror.history))
+            horror.stop()
+        self.assertGreater(len(traces[0]),0)
+        self.assertTrue(all(trace==traces[0] for trace in traces))
+
+    def test_horror_eligibility_suppresses_interfaces_chases_hiding_and_puzzle_proximity(self):
+        horror=self.prepare_horror()
+        self.assertTrue(horror.eligible_events())
+        self.manager.input('tab')
+        self.assertFalse(horror.eligible_events())
+        self.manager.input('escape')
+        self.ghost.ai.state=GhostState.CHASE
+        self.assertFalse(horror.eligible_events())
+        self.ghost.ai.state=GhostState.PATROL
+        self.player.position=Vec3(-3.2,0,8.5)
+        self.assertFalse(horror.eligible_events())
+        spot=self.house.hiding_spots[0]
+        self.player.position=Vec3(spot.approach)
+        self.player.enter_hiding(spot)
+        self.assertFalse(horror.eligible_events())
+        self.player.leave_hiding()
+        self.manager.game_over()
+        self.assertFalse(horror.eligible_events())
+
+    def test_horror_critical_interface_immediately_restores_an_active_event(self):
+        horror=self.prepare_horror()
+        before=[tuple(light.color) for light in horror.lights]
+        horror.start_event('power_dip')
+        horror.update(2)
+        self.assertNotEqual(before,[tuple(light.color) for light in horror.lights])
+        self.manager.input('tab')
+        self.assertIsNone(horror.active)
+        self.assertEqual(before,[tuple(light.color) for light in horror.lights])
+
+    def test_horror_lighting_restores_exactly_and_never_changes_the_flashlight(self):
+        horror=self.prepare_horror()
+        self.player.toggle_flashlight()
+        torch=tuple(self.player.flashlight_light.color)
+        for event in ('power_dip','fill_failure','room_dimming','hallway_dim'):
+            horror.next_allowed=0
+            original={id(e):tuple(e.color) for e in (*horror.lights,*descendants(self.house.rooms['main_hall']),*self.house.walls)}
+            self.assertTrue(horror.start_event(event))
+            duration=horror.active['definition'].seconds
+            horror.update(duration/2)
+            self.assertEqual(torch,tuple(self.player.flashlight_light.color))
+            self.assertTrue(any(tuple(e.color)!=original[id(e)] for e,_ in horror.active['colors']))
+            horror.update(duration/2)
+            self.assertIsNone(horror.active)
+            for e in (*horror.lights,*descendants(self.house.rooms['main_hall']),*self.house.walls):
+                self.assertEqual(tuple(e.color),original[id(e)])
+
+    def test_horror_environment_transforms_restore_without_moving_colliders_or_pickups(self):
+        horror=self.prepare_horror('living')
+        colliders={id(e):(Vec3(e.world_position),Vec3(e.world_rotation)) for e in scene.collidables}
+        pickups={name:Vec3(e.world_position) for name,e in self.house.pickups.items()}
+        for name in ('prop_shift','prop_vibration','cabinet_creak','distant_close'):
+            horror.next_allowed=0
+            horror.room_entered=horror.clock
+            self.assertTrue(horror.start_event(name))
+            active=horror.active
+            target,position,rotation=active['transforms'][0]
+            horror.update(.7)
+            self.assertTrue(target.position!=position or target.rotation!=rotation)
+            for e in scene.collidables:
+                self.assertEqual((e.world_position,e.world_rotation),colliders[id(e)])
+            for key,e in self.house.pickups.items(): self.assertEqual(e.world_position,pickups[key])
+            horror.cancel_active()
+            if not target.is_empty():
+                self.assertEqual(target.position,position)
+                self.assertEqual(target.rotation,rotation)
+
+    def test_horror_apparition_expires_without_collision_or_damage(self):
+        horror=self.prepare_horror()
+        before=len(scene.collidables)
+        self.assertTrue(horror.start_event('apparition'))
+        apparition=horror.active['temporary'][0]
+        self.assertIsNone(apparition.collider)
+        self.assertEqual(len(scene.collidables),before)
+        self.assertEqual(self.manager.state,'playing')
+        horror.update(6)
+        self.assertIsNone(horror.active)
+        self.assertTrue(apparition.is_empty())
+
+    def test_horror_apparition_disappears_when_illuminated_or_approached(self):
+        horror=self.prepare_horror()
+        for illuminated in (True,False):
+            horror.next_allowed=0
+            self.player.position=Vec3(0,0,0)
+            self.player.rotation_y=0
+            camera.rotation=Vec3(0,0,0)
+            self.assertTrue(horror.start_event('apparition'))
+            apparition=horror.active['temporary'][0]
+            if illuminated:
+                self.aim(apparition.world_position)
+                self.player.toggle_flashlight()
+            else:
+                self.player.position=Vec3(apparition.world_position)+Vec3(0,-.85,-1)
+            horror.update(1/30)
+            self.assertIsNone(horror.active)
+            self.assertTrue(apparition.is_empty())
+            if illuminated: self.player.toggle_flashlight()
+
+    def test_horror_events_leave_ghost_navigation_and_puzzle_inventory_intact(self):
+        horror=self.prepare_horror('living')
+        self.player.inventory.add('fuse')
+        self.player.inventory.add('battery',2)
+        inventory=dict(self.player.inventory.quantities)
+        graph={node:tuple(edges) for node,edges in self.house.graph.items()}
+        horror.start_event('cabinet_creak')
+        horror.update(1)
+        for a,neighbors in self.house.graph.items():
+            for b in neighbors:
+                self.assertTrue(self.ghost.ai.navigation.segment_clear(self.house.nav_nodes[a],self.house.nav_nodes[b]))
+        self.assertEqual(graph,{node:tuple(edges) for node,edges in self.house.graph.items()})
+        self.assertEqual(inventory,self.player.inventory.quantities)
+        self.assertFalse(self.player.progression.power_restored)
+        self.assertFalse(self.house.exit_door.opening)
+        self.assertFalse(self.house.basement_door.opening)
+        horror.cancel_active()
+
+    def test_horror_repeated_effects_do_not_accumulate_entities_lights_or_sequences(self):
+        horror=self.prepare_horror('living')
+        self.app.taskMgr.step()  # Flush Ursina's deferred scene-list removals.
+        baseline=(len(scene.entities),len(scene.collidables),len(application.sequences),self.app.render.get_state().get_attrib(LightAttrib))
+        for _ in range(60):
+            horror.next_allowed=0
+            self.assertTrue(horror.start_event('cabinet_creak'))
+            horror.update(1)
+            horror.cancel_active()
+            self.app.taskMgr.step()
+            self.assertEqual(len(scene.entities),baseline[0])
+            self.assertEqual(len(scene.collidables),baseline[1])
+            self.assertLessEqual(len(application.sequences),baseline[2])
+            self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib),baseline[3])
+        self.assertLessEqual(len(horror.history),64)
+
+    def test_horror_restart_cleans_active_effects_and_resets_seed_and_tension(self):
+        horror=self.prepare_horror('living')
+        horror.start_event('cabinet_creak')
+        temporary=horror.active['temporary'][0]
+        self.manager.restart_game()
+        fresh=self.manager.scene_manager.horror
+        self.assertFalse(horror.running)
+        self.assertTrue(temporary.is_empty())
+        self.assertIsNone(horror.active)
+        self.assertEqual(fresh.clock,0)
+        self.assertEqual(fresh.director.tension,0)
+        self.assertEqual(list(fresh.history),[])
+
+    def test_horror_director_rest_periods_after_chase_and_hiding(self):
+        horror=self.prepare_horror()
+        self.ghost.ai.state=GhostState.CHASE
+        horror.update(1)
+        self.ghost.ai.state=GhostState.SEARCH
+        horror.update(1/30)
+        self.assertGreater(horror.director.quiet_until,horror.clock+17)
+        self.assertFalse(horror.eligible_events())
+        self.assertGreater(horror.director.tension,0)
+
+    def test_horror_accessibility_frequency_and_intensity_limits(self):
+        self.prepare_horror()
+        horror=HorrorManager(self.house,self.player,self.ghost,self.manager.scene_manager.lights,frequency=0)
+        horror.update(600)
+        self.assertFalse(horror.eligible_events())
+        self.assertEqual(list(horror.history),[])
+        horror=self.manager.scene_manager.horror
+        with patch('game.settings.HORROR_INTENSITY_LIMIT',.1):
+            self.assertTrue(horror.start_event('power_dip'))
+            self.assertLessEqual(horror.active['intensity'],.1)
+        horror.cancel_active()
+
+    def test_horror_jumpscare_stages_freeze_controls_and_preserve_real_ghost_position(self):
+        self.prepare_horror()
+        self.player.position=Vec3(0,0,-8)
+        self.ghost.position=Vec3(0,0,-7.2)
+        self.ghost.rotation_y=180
+        original=Vec3(self.ghost.world_position)
+        self.ghost.ai.state=GhostState.CHASE
+        self.ghost.ai.update()
+        scare=self.ghost.jumpscare
+        self.assertEqual(self.manager.state,'jumpscare')
+        self.assertTrue(scare.active)
+        self.assertFalse(self.player.enabled)
+        self.assertFalse(self.ghost.enabled)
+        self.assertEqual(scare.phase,'seize')
+        self.assertFalse(scare.trigger())
+        self.app.input('tab',is_raw=True)
+        self.app.input('e',is_raw=True)
+        self.assertFalse(self.manager.hud.panel.active)
+        scare.update(scare.duration*.4)
+        self.assertEqual(scare.phase,'approach')
+        self.assertEqual(self.ghost.world_position,original)
+        self.assertGreater(scare.proxy.z-.225,.1)
+        scare.update(scare.duration*.4)
+        self.assertEqual(scare.phase,'fade')
+        scare.update(scare.duration)
+        self.assertEqual(self.manager.state,'dead')
+        self.assertIsNone(scare.proxy)
+        self.assertIsNone(scare.overlay)
+
+    def test_horror_jumpscare_duration_at_four_frame_rates(self):
+        from game.ghost.jumpscare import Jumpscare
+        for fps in (4,30,60,120):
+            completed=[]
+            scare=Jumpscare()
+            scare.begin(lambda:completed.append(True))
+            for _ in range(math.ceil(scare.duration*fps)-1): scare.update(1/fps)
+            self.assertTrue(scare.active)
+            scare.update(1/fps)
+            self.assertFalse(scare.active)
+            self.assertEqual(completed,[True])
+            scare.update(5)
+            self.assertEqual(completed,[True])
+
+    def test_horror_restart_during_jumpscare_restores_camera_and_temporary_entities(self):
+        self.prepare_horror()
+        self.ghost.jumpscare.trigger()
+        scare=self.ghost.jumpscare
+        scare.update(.8)
+        proxy,overlay=scare.proxy,scare.overlay
+        self.app.input('r',is_raw=True)
+        self.assertEqual(self.manager.state,'playing')
+        self.assertTrue(proxy.is_empty())
+        self.assertTrue(overlay.is_empty())
+        self.assertEqual(camera.fov,90)
+        self.assertEqual(camera.rotation,Vec3(0,0,0))
+        self.assertEqual(camera.parent,self.manager.scene_manager.player.camera_pivot)
+        self.assertFalse(self.manager.scene_manager.ghost.jumpscare.triggered)
+
+    def test_horror_wardrobe_cinematic_is_visible_over_world_occluders(self):
+        spot=self.house.hiding_spots[0]
+        self.player.position=Vec3(spot.approach)
+        self.player.enter_hiding(spot)
+        self.ghost.position=spot.approach+Vec3(1,0,0)
+        self.ghost.ai.state=GhostState.SEARCH
+        self.ghost.ai.search_time=GHOST_ACTIVE_SEARCH_SECONDS
+        self.ghost.ai.recovery_time=0
+        self.ghost.ai.inspection_target=spot
+        self.ghost.ai.navigation.clear()
+        self.ghost.ai.inspection_time=1.49
+        time.dt=.03
+        self.ghost.ai.update()
+        self.assertEqual(self.manager.state,'jumpscare')
+        image=self.capture('render_horror_wardrobe_regression.png')
+        center_mean=sum(ImageStat.Stat(image.crop((600,300,680,400))).mean)/3
+        self.assertGreater(center_mean,35)
+        self.assertFalse(self.manager.hud.panel.active)
+        self.finish_jumpscare()
+
+    def test_horror_restart_cycles_clean_events_and_cinematic_entities(self):
+        self.app.taskMgr.step()
+        self.app.taskMgr.step()
+        baseline=(len(scene.entities),len(scene.collidables),
+                  self.app.render.get_state().get_attrib(LightAttrib).get_num_on_lights())
+        for index in range(12):
+            horror=self.prepare_horror('living')
+            if index%2:
+                self.ghost.jumpscare.trigger()
+                self.ghost.jumpscare.update(.7)
+            else:
+                horror.start_event('cabinet_creak')
+                horror.update(.7)
+            self.manager.restart_game()
+            self.player,self.house,self.ghost=(self.manager.scene_manager.player,self.manager.scene_manager.house,
+                                              self.manager.scene_manager.ghost)
+            self.ghost.enabled=False
+            time.dt=1/60
+            self.app.taskMgr.step()
+            self.app.taskMgr.step()
+            self.assertEqual((len(scene.entities),len(scene.collidables),
+                              self.app.render.get_state().get_attrib(LightAttrib).get_num_on_lights()),baseline)
+            self.assertEqual(camera.rotation,Vec3(0,0,0))
+            self.assertFalse(self.player.inventory.quantities)
+            self.assertIsNone(self.manager.scene_manager.horror.active)
+
+    def test_horror_reduced_jumpscare_and_focus_loss_freeze_time(self):
+        self.prepare_horror()
+        with patch('game.settings.JUMPSCARE_INTENSITY',0):
+            self.ghost.jumpscare.trigger()
+        scare=self.ghost.jumpscare
+        original=Vec3(camera.world_rotation)
+        self.manager.set_focus(False)
+        time.dt=.5
+        self.manager.update()
+        self.assertEqual(scare.elapsed,0)
+        self.manager.set_focus(True)
+        self.manager.update()  # First resume frame has zero dt.
+        time.dt=.5
+        self.manager.update()
+        self.assertEqual(camera.world_rotation,original)
+        self.assertAlmostEqual(scare.proxy.z,2.4,places=6)
+        self.assertEqual(scare.overlay.color.a,0)
+        self.manager.restart_game()
+
+    def test_horror_full_puzzle_escape_with_live_director_has_no_softlocks(self):
+        self._horror_during_walk=True
+        self.test_progression_complete_chain_walks_real_routes_and_escapes()
+        horror=self.manager.scene_manager.horror
+        self.assertGreater(len(horror.history),0)
+        self.assertIsNone(horror.active)
+        self.assertFalse(horror.running)
 
     def test_progression_inventory_modal_blocks_input_but_not_simulation(self):
         self.player.obtain_flashlight()
@@ -259,6 +608,7 @@ class PrototypeTests(unittest.TestCase):
         self.ghost.ai.state = GhostState.CHASE
         self.ghost.ai.detection = 1
         self.ghost.ai.update()
+        self.finish_jumpscare()
         self.assertEqual(self.manager.state,'dead')
         self.assertFalse(self.manager.hud.panel.active)
 
@@ -307,6 +657,7 @@ class PrototypeTests(unittest.TestCase):
         self.ghost.ai.state = GhostState.CHASE
         self.ghost.ai.detection = 1
         self.ghost.ai.update()
+        self.finish_jumpscare()
         self.assertEqual(self.manager.state,'dead')
         self.manager.restart_game()
         player, ghost, house = (self.manager.scene_manager.player,self.manager.scene_manager.ghost,
@@ -320,6 +671,8 @@ class PrototypeTests(unittest.TestCase):
         ghost.ai.state=GhostState.CHASE
         ghost.ai.detection=1
         ghost.ai.update()
+        self.assertEqual(self.manager.state,'jumpscare')
+        ghost.jumpscare.update(ghost.jumpscare.duration)
         self.assertEqual(self.manager.state,'dead')
         self.assertFalse(self.manager.hud.panel.active)
 
@@ -638,6 +991,7 @@ class PrototypeTests(unittest.TestCase):
         ai.update()
         self.assertEqual(ai.state, GhostState.JUMPSCARE)
         self.assertTrue(self.ghost.jumpscare.triggered)
+        self.finish_jumpscare()
         self.assertEqual(self.manager.state, "dead")
         self.assertFalse(self.player.enabled)
         self.assertEqual(self.player.flashlight_light.color.r, 0)
@@ -1129,6 +1483,12 @@ class PrototypeTests(unittest.TestCase):
                 before = Vec3(self.player.position)
                 held_keys["w"] = 1
                 self.player.update()
+                if getattr(self,'_horror_during_walk',False):
+                    horror=self.manager.scene_manager.horror
+                    if self.player.has_flashlight and not horror.history and not horror.protected():
+                        horror.next_allowed=0
+                        horror.start_event('power_dip')
+                    horror.update(time.dt)
                 self.assertGreater((self.player.position - before).length(), 0.000001,
                                    f"Player blocked en route to {point} at {before}")
                 self.assertAlmostEqual(self.player.y, 0, delta=0.01)
@@ -1471,8 +1831,9 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(self.manager.state, "playing")
         for _ in range(240):
             ai.update()
-            if self.manager.state == "dead":
+            if self.manager.state == "jumpscare":
                 break
+        self.finish_jumpscare()
         self.assertEqual(self.manager.state, "dead")
         self.assertEqual(ai.state, GhostState.JUMPSCARE)
 

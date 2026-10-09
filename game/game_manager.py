@@ -22,7 +22,7 @@ class GameManager(Entity):
         self.scene_manager = SceneManager(
             hud=self.hud,
             on_escape=self.win_game,
-            on_caught=self.game_over,
+            on_caught=self.begin_jumpscare,
         )
 
         self.hud.show_message(
@@ -49,6 +49,9 @@ class GameManager(Entity):
 
         if key == "r" and self.state != "playing" and self._focused:
             self.restart_game()
+            return True
+        if self.state == "jumpscare":
+            return True
 
     def restart_game(self):
         self.scene_manager.dispose()
@@ -58,7 +61,7 @@ class GameManager(Entity):
         self.end_screen.enabled = False
         self.hud.enabled = True
         self.hud.set_prompt("")
-        self.scene_manager = SceneManager(self.hud, self.win_game, self.game_over)
+        self.scene_manager = SceneManager(self.hud, self.win_game, self.begin_jumpscare)
         self.hud.show_message("Find the flashlight. Read the living-room note; Tab opens inventory.", seconds=4)
         if not self._focused:
             mouse.locked = False
@@ -99,9 +102,26 @@ class GameManager(Entity):
             self._layout_size = size
             self.hud.layout(size[0] / max(size[1], 1))
             self.end_screen.resize(size[0] / max(size[1], 1))
+        if self._focused and not application.paused:
+            if self.state == "playing":
+                self.scene_manager.horror.update(time.dt)
+            elif self.state == "jumpscare":
+                self.scene_manager.ghost.jumpscare.update(time.dt)
+
+    def begin_jumpscare(self):
+        if self.state != "playing":
+            return
+        self.state = "jumpscare"
+        self.scene_manager.stop_gameplay()
+        self.scene_manager.ghost.ai.navigation.clear()
+        held_keys.clear()
+        mouse.velocity = Vec3(0,0,0)
+        mouse.locked = False
+        self.hud.enabled = False
+        self.scene_manager.ghost.jumpscare.begin(self.game_over)
 
     def game_over(self):
-        if self.state != "playing":
+        if self.state not in ("playing","jumpscare"):
             return
 
         self.state = "dead"

@@ -13,7 +13,7 @@ Python/Ursina first-person horror prototype.
 - Tab - Open/close inventory; Up/Down select; Enter inspect/read
 - U then Enter - Confirm use of the selected stored battery; Backspace cancels
 - 0-9 / Backspace / Enter - Enter, erase, and submit a lock combination
-- R - Restart after death/win
+- R - Restart after death/win or during a staged catch
 - Esc - Close an open inventory/note/lock screen; quit when no screen is open
 
 ## Prototype 0.1
@@ -46,6 +46,179 @@ into inventory and used deliberately. Read the living-room note to begin the
 fuse, combination, and crowbar sequence below. The yellow exit key remains
 inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
 with E, then walk through the opening to escape. The ghost uses placeholder geometry.
+
+## Milestone 5: paranormal events and staged catches
+
+The existing house, puzzle sequence, ghost sensing/navigation, controller, and
+flashlight configuration are preserved. `HorrorManager` now owns a private seeded
+RNG, a lightweight tension director, and at most one reversible effect. There
+are no new lights, colliders, tasks, delayed event callbacks, assets, or levels.
+
+| Category | Events | Implementation |
+| --- | --- | --- |
+| Lighting | `room_dimming`, `hallway_dim` | Smooth temporary tint reduction on existing room meshes/shared wall segments |
+| Lighting | `power_dip`, `fill_failure` | Temporarily reduce existing ambient/fill lights; fill can briefly reach zero while ambient remains |
+| Environment | `prop_shift`, `prop_vibration` | Small offsets/rotations of nonessential decorative furniture meshes; assembly colliders stay fixed |
+| Environment | `cabinet_creak`, `distant_close` | A temporary decorative leaf on the living-room cabinet; closing is eligible shortly after entering |
+| Apparition | `apparition`, `shadow_pass` | Faint, flat, faceless geometric silhouettes in visible corridors/doorways; shadow pass briefly moves sideways |
+
+Effects last 3–6 seconds and restore exact original colors/transforms or destroy
+temporary geometry. Silhouettes have no collider or AI, cannot hurt the player,
+and disappear when approached within 2.5 units, illuminated by the real beam
+with clear sight, or expired. Their thin gray shape differs from the blue solid
+ghost. They use a faint unlit tint so that an apparition remains perceptible in
+the dark; this adds no environmental illumination. The real ghost is never
+teleported for these events.
+
+The house has no individual powered room lamps. Local lighting disturbances are
+therefore a material-tint approximation; shared wall segments may affect the
+neighboring room's wall too. Global fluctuations change the actual existing
+environmental lights. Neither approach changes flashlight intensity, beam,
+shadows, fog, battery behavior, or registered light count. Even a fill-light
+failure retains dim ambient navigation visibility. No full-screen flash is used.
+Cabinet motion is decorative: exit/basement doors, their 0.8-second animation,
+locks, and doorway blockers remain under gameplay control.
+
+### Pacing and protections
+
+Default pacing begins with 30 seconds of quiet. Every 5 seconds, an eligible
+event has a probability of `0.18 + 0.32 * tension`. Completed or cancelled events
+start a seeded 28–48 second cooldown. One active effect prevents overlap.
+Category weights are lighting 35%, environment 40%, apparition 25%, redistributed
+among eligible kinds; these weights are configurable. Selection respects the
+current room, safe props, clear sight, minimum tension, and recent room entry.
+
+Tension changes smoothly from exploration time, ghost proximity, recent chase,
+puzzle progress, recent hiding, and time since an event. It influences probability
+and intensity, with a 0.75 intensity cap. Leaving a chase grants at least 18
+seconds without disturbances; leaving hiding grants 8 seconds. Hiding and active
+chases suppress all environmental events. Early events are weaker; later
+progress permits apparitions and fill failures.
+
+Events cannot start during inventory/notes/combination screens, within 3 units
+of an active puzzle prop, during exit opening, after victory/loss, or during a
+staged catch. Opening an interface immediately restores an existing event.
+Nearby puzzle interactions cancel effects on the next director update. The
+ghost continues during interfaces according to Milestone 4's active policy;
+event suppression does not grant immunity to legitimate ghost capture.
+
+The director ticks at 30 Hz using accumulated elapsed time, with a private RNG
+independent of flashlight flicker and AI randomness. Identical seeds and player/
+ghost context produce the same scheduling trace at 4, 30, 60, and 120 FPS.
+This does not make the entire game deterministic: player decisions and the
+existing independently randomized ghost affect eligibility. History is capped
+at 64 records; restart resets clock, RNG, tension, and all temporary state.
+
+### Staged jumpscare and accessibility
+
+Existing AI catches still require chase proximity plus line of sight, or a
+completed reachable wardrobe inspection. A validated catch changes the manager
+to `jumpscare`, closes interfaces, restores/cancels environmental events, freezes
+normal player/ghost updates, clears navigation and held input, and hides the HUD.
+
+Over 1.8 seconds the sequence seizes the view, smoothly brings a cube ghost
+presentation closer, applies restrained camera rotation, and fades darker before
+the existing CAUGHT screen. A camera-space presentation mesh is composited over
+world geometry so that a wardrobe face cannot hide it. This mesh has no collider,
+uses no extra light, and remains beyond the near plane. The real ghost stays at
+its catch location. There is no full-screen flashing or external animation.
+The controller triggers once, cleans up its mesh/overlay, and restores the
+camera transform/FOV. R also restarts during the encounter. Focus loss pauses
+its elapsed time, and the first refocused frame has zero dt as before.
+
+Edit the existing `game/settings.py` constants (no settings menu yet):
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `HORROR_SEED` | `1729` | Reproducible event RNG |
+| `HORROR_EVENT_FREQUENCY` | `1.0` | 0 disables events; up to 3 scales quiet/check/cooldown intervals |
+| `HORROR_INTENSITY_LIMIT` | `0.75` | Upper bound on effect strength |
+| `HORROR_REDUCED_FLICKER` | `True` | Slow smooth dimming; False permits low-contrast 0.8 Hz modulation |
+| `JUMPSCARE_SECONDS` | `1.8` | Encounter duration |
+| `JUMPSCARE_INTENSITY` | `0.65` | 0 disables approach/shake/darkening while retaining the terminal transition |
+| `JUMPSCARE_REDUCED_SHAKE` | `False` | Reduce rotation shake to 15% |
+| `JUMPSCARE_SHAKE_DEGREES` | `0.45` | Base rotation amplitude, further scaled by intensity |
+
+The reduced-flicker setting covers environmental events; the established
+flashlight's low-battery flicker is unchanged.
+
+### Verification and manual testing
+
+Baseline validation passed all 88 tests before edits. The expanded suite passed
+**109 tests in 117.110 seconds**, retaining those 88 named cases and adding 21
+horror regressions. Compilation and Git diff checks passed. Legacy catch tests now wait
+for the cinematic to finish before checking the terminal screen. New coverage
+includes cooldowns, seeded/FPS schedules, eligibility, exact light/prop restoration,
+apparition expiry/beam/approach, navigation and inventory preservation, 60 effect
+cycles, 12 restarts during active events/catches, accessibility/focus, staged
+transitions, duplicate prevention, a real wardrobe screenshot regression, and
+the complete walking puzzle-to-escape route with a live director.
+
+Run the same compilation, unittest, Git diff, and native smoke commands listed
+in Milestone 4. Native screenshots are test evidence, not imported game assets:
+[normal hallway](game/tests/render_horror_hallway_normal.png),
+[lighting disturbance](game/tests/render_horror_lighting_disturbance.png),
+[apparition](game/tests/render_horror_apparition.png),
+[cabinet disturbance](game/tests/render_horror_environment.png),
+[staged encounter](game/tests/render_horror_jumpscare.png),
+[game over](game/tests/render_horror_game_over.png).
+
+Automated scheduling tests check the ordinary seeded director separately. The
+native script forces eligible events for visual fixtures, exercises a live
+witnessed inspection/catch, and completes the puzzle route with the ordinary
+director active. The ghost is disabled
+only for deterministic puzzle routing and frozen for visual fixtures. Windows
+has no Xvfb executable here: regression rendering uses an actual offscreen GPU
+buffer, and `main.py` is tested in a native window. Native resize requests are
+awaited; after separate native/direct focus checks, fixtures pin focus to avoid
+WM changes interrupting synthetic keys. This is scripted testing, not human
+gameplay or a verified physical Alt-Tab test.
+
+At native 1280×720 on the RTX 3050 Laptop GPU, startup task timing was 7.98 ms
+median / 10.94 ms p95. A matched fixed-dt fixture with flashlight ON and ghost
+frozen measured 18.53 / 24.21 ms quiet versus 19.32 / 26.44 ms during cabinet
+motion. Those two fixtures include an extra explicit `renderFrame`; they are
+comparable to each other, not to the startup task-only measurement. Hallway
+world-region mean brightness changed from 9.42 to 5.83 during the forced dip;
+original colors restored exactly. Nine baseline flashlight OFF/ON comparisons
+passed. These are local scripted observations, not a general hardware benchmark.
+
+1. Run `.\.venv\Scripts\python.exe main.py`. Collect the flashlight and explore
+   rooms for at least a minute; events are probabilistic, with initial quiet and
+   cooldowns, so they need not appear immediately.
+2. Watch the hallway with F off, then use the beam. Check that local/global
+   dimming ends cleanly and that beam brightness/drain remain familiar.
+3. Inspect living-room cabinet/props during a disturbance. Check movement,
+   collision, and ghost routes; effects must not open the locked exit/basement
+   or move a pickup. Approach/illuminate a silhouette and confirm it disappears.
+4. Complete the unchanged fuse → clues → combination → crowbar → key → exit
+   sequence. Open/reread inventory and notes during exploration. Check that
+   environmental events stop for interfaces/near puzzles while ghost risk remains.
+5. Evade a chase, hide, and leave hiding. Check the ensuing quiet periods.
+   Let the real ghost catch you in open space and through a witnessed wardrobe
+   inspection. Confirm a visible short encounter followed by CAUGHT; R must
+   cleanly restart. Also try R during the encounter.
+6. Repeat wins/catches/restarts, resize, and Alt-Tab during effects and encounters.
+   Check restored colors, FOV, pointer capture, and fresh input. Try accessibility
+   constants in a new run and restore your preferred values afterward.
+
+Remaining limits: faint geometric placeholders, no sound/cinematics/story assets,
+approximate local lighting, decorative cabinet motion rather than autonomous
+passage doors, composited camera-space catch presentation, and no save system.
+Long-session memory profiling, physical mouse/Alt-Tab, motion-comfort assessment,
+and suspense/resource balance with a human player remain unverified. Existing
+Panda3D icon/profile/framebuffer/foreground warnings remain nonfatal.
+
+Modified files: `game/systems/horror_manager.py`, `game/ghost/jumpscare.py`,
+`game/game_manager.py`, `game/scene_manager.py`, `game/settings.py`,
+`game/ui/inventory_ui.py`, `game/tests/test_prototype.py`,
+`game/tests/windowed_smoke.py`, and this `README.md`. No new code modules or
+folders were needed; no commit, push, or merge was performed.
+
+For Milestone 6, prioritize human pacing/motion-comfort tests and resource balance,
+then clearer procedural scare silhouettes/prop affordances and accessibility
+controls. Design checkpoint semantics for inventory/puzzles/events before adding
+persistence. Add an authored sound/story pass only when that asset work is approved.
 
 ## Milestone 4: inventory, puzzles, and story progression
 

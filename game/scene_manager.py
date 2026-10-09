@@ -3,6 +3,7 @@ from game.player.player import HorrorPlayer
 from game.world.house import House
 from game.world.environment import create_environment
 from game.systems.progression import Progression
+from game.systems.horror_manager import HorrorManager
 from ursina import application, camera, destroy, scene
 
 
@@ -49,8 +50,12 @@ class SceneManager:
             hiding_spots=self.house.hiding_spots,
         )
         self.player.ghost_ai = self.ghost.ai
+        self.horror = HorrorManager(self.house,self.player,self.ghost,self.lights)
+        self.player.horror = self.horror
 
     def stop_gameplay(self):
+        self.horror.stop()
+        self.ghost.jumpscare.cancel()
         self.player.cleanup()
 
         self.player.enabled = False

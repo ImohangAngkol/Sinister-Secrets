@@ -32,6 +32,19 @@ def verify_window(app):
         assert app.win.saveScreenshot(Filename.from_os_specific(str(path.resolve())))
         return Image.open(path).convert("RGB")
 
+    def resize(width,height):
+        properties=WindowProperties()
+        properties.set_size(width,height)
+        app.win.request_properties(properties)
+        # Native WM requests are asynchronous; allow delivery before asserting.
+        for _ in range(100):
+            frames(1)
+            if (app.win.get_x_size(),app.win.get_y_size())==(width,height):
+                frames(2)
+                return
+            wall_clock.sleep(.01)
+        raise AssertionError(('Resize not applied',width,height,app.win.get_properties()))
+
     def pose(position, target):
         camera.position = Vec3(*position)
         direction = Vec3(*target) - camera.position
@@ -51,10 +64,7 @@ def verify_window(app):
         print(f"FRAME_TIMING: median={statistics.median(costs):.2f}ms "
               f"p95={sorted(costs)[113]:.2f}ms (native scripted run, not a laptop benchmark)")
         for width, height in ((640, 480), (960, 720), (1280, 720)):
-            properties = WindowProperties()
-            properties.set_size(width, height)
-            app.win.request_properties(properties)
-            frames()
+            resize(width,height)
             assert app.win.get_x_size() == width and app.win.get_y_size() == height
             assert abs(manager.hud.inventory_ui.x - (-width / height / 2 + 0.03)) < 0.001
             manager.hud.show_message("Flashlight battery is already full. Leave this battery for later.")
@@ -83,6 +93,10 @@ def verify_window(app):
         assert not application.paused and mouse.locked
         assert not held_keys["w"]
         print("FOCUS_CHECK: native focus loss observed =", native_focus_loss)
+        # The WM can send further focus changes while scripted keyboard input
+        # runs. After validating real/fallback focus handling above, pin focus
+        # for deterministic fixtures; physical Alt-Tab still needs human testing.
+        manager.window_events.ignore('window-event')
 
         for cycle in range(6):
             (manager.win_game if cycle % 2 else manager.game_over)()
@@ -127,6 +141,78 @@ def verify_window(app):
             for _ in range(count):
                 time.dt = time.dt_unscaled = 1 / 60
                 frames(1)
+
+        # Force eligible effects for same-pose visual evidence; normal scheduling
+        # is tested separately. The real ghost is frozen only for these fixtures.
+        horror = manager.scene_manager.horror
+        player.position,player.rotation_y = Vec3(0,0,-7),0
+        player.camera_pivot.rotation_x = 0
+        camera.rotation = Vec3(0,0,0)
+        simulated_frames(2)
+        normal = capture('render_horror_hallway_normal.png')
+        horror.next_allowed=0
+        horror.director.tension=.9
+        assert horror.start_event('power_dip')
+        lighting_before = [tuple(light.color) for light in horror.lights]
+        simulated_frames(120)
+        disturbed = capture('render_horror_lighting_disturbance.png')
+        region=(160,180,1120,640)
+        normal_mean=statistics.mean(ImageStat.Stat(normal.crop(region)).mean)
+        dim_mean=statistics.mean(ImageStat.Stat(disturbed.crop(region)).mean)
+        assert dim_mean < normal_mean-.2,(normal_mean,dim_mean)
+        assert not player.flashlight_on and player.flashlight_light.color.r==0
+        horror.cancel_active()
+        assert [tuple(light.color) for light in horror.lights]==lighting_before
+        print(f'HORROR_LIGHTING_PIXELS normal={normal_mean:.2f}, disturbed={dim_mean:.2f}')
+        horror.next_allowed=0
+        horror.director.tension=.9
+        assert horror.start_event('apparition')
+        apparition=horror.active['temporary'][0]
+        camera.look_at(apparition.world_position)
+        simulated_frames(2)
+        capture('render_horror_apparition.png')
+        app.input('f',is_raw=True)
+        simulated_frames(2)
+        assert horror.active is None and apparition.is_empty()
+        app.input('f',is_raw=True)
+
+        player.position,player.rotation_y = Vec3(-6,0,-6),0
+        player.camera_pivot.rotation_x=0
+        camera.rotation=Vec3(0,0,0)
+        simulated_frames(2)
+        horror.next_allowed=0
+        horror.director.tension=.9
+        assert horror.start_event('cabinet_creak')
+        leaf=horror.active['temporary'][0]
+        camera.look_at(leaf.world_position)
+        app.input('f',is_raw=True)
+        simulated_frames(150)
+        capture('render_horror_environment.png')
+        assert leaf.rotation_y>1 and leaf.collider is None
+        costs=[]
+        for _ in range(90):
+            before=wall_clock.perf_counter()
+            simulated_frames(1)
+            costs.append((wall_clock.perf_counter()-before)*1000)
+        print(f'HORROR_ACTIVE_TIMING median={statistics.median(costs):.2f}ms p95={sorted(costs)[85]:.2f}ms '
+              '(native fixed-dt fixture, flashlight ON, ghost frozen, includes explicit renderFrame)')
+        horror.cancel_active()
+        assert leaf.is_empty()
+        costs=[]
+        for _ in range(90):
+            before=wall_clock.perf_counter()
+            simulated_frames(1)
+            costs.append((wall_clock.perf_counter()-before)*1000)
+        print(f'HORROR_QUIET_TIMING median={statistics.median(costs):.2f}ms p95={sorted(costs)[85]:.2f}ms '
+              '(same native fixed-dt fixture, flashlight ON, ghost frozen, explicit renderFrame)')
+        app.input('f',is_raw=True)
+        # Reset pacing for the survival fixture; upcoming puzzle exploration
+        # retains the live director with ordinary seeded scheduling.
+        horror.stop()
+        from game.systems.horror_manager import HorrorManager
+        manager.scene_manager.horror = HorrorManager(house,player,ghost,manager.scene_manager.lights)
+        player.horror=manager.scene_manager.horror
+        print('HORROR_WINDOW_OK: reversible dimming, same-pose pixel comparison, apparition/beam cleanup, decorative cabinet motion')
 
         player.position, player.rotation_y = Vec3(0, 0, -10), 0
         player.camera_pivot.rotation_x = 10
@@ -180,12 +266,19 @@ def verify_window(app):
         simulated_frames(65)
         assert manager.state == "playing" and ghost.ai.inspection_target == spot
         capture("render_survival_inspection.png")
-        for _ in range(240):
+        staged_capture=False
+        for _ in range(300):
             simulated_frames(1)
+            if (manager.state=='jumpscare' and ghost.jumpscare.elapsed>=.7 and not staged_capture):
+                staged=capture('render_horror_jumpscare.png')
+                assert statistics.mean(ImageStat.Stat(staged.crop((600,300,680,400))).mean)>35
+                staged_capture=True
             if manager.state == "dead":
                 break
         assert manager.state == "dead"
+        assert staged_capture and ghost.jumpscare.proxy is None and ghost.jumpscare.overlay is None
         capture("render_survival_caught.png")
+        capture('render_horror_game_over.png')
         app.input("r", is_raw=True)
         simulated_frames(2)
         assert manager.state == "playing"
@@ -216,7 +309,10 @@ def verify_window(app):
                     before = Vec3(player.position)
                     time.dt = time.dt_unscaled = min(1/30,delta.length()/5)
                     frames(1)
-                    assert (player.position-before).length() > .000001, (point,before)
+                    assert (player.position-before).length() > .000001, (
+                        point,before,'W',held_keys['w'],'dt',time.dt,'focused',manager._focused,
+                        'paused',application.paused,'enabled',player.enabled,'state',manager.state,
+                        'panel',manager.hud.panel.mode)
                 raise AssertionError(f'Route did not reach {point}')
             finally:
                 app.input('w up',is_raw=True)
@@ -245,13 +341,10 @@ def verify_window(app):
         simulated_frames(2)
         capture('render_progression_inventory.png')
         # Check compact screen layout in the actual window, not only arithmetic.
-        properties = WindowProperties()
-        properties.set_size(640,480)
-        app.win.request_properties(properties)
+        resize(640,480)
         simulated_frames(8)
         capture('render_progression_inventory_640x480.png')
-        properties.set_size(1280,720)
-        app.win.request_properties(properties)
+        resize(1280,720)
         simulated_frames(8)
         app.input('tab',is_raw=True)
         visit(props['fuse_box'],house.puzzles['fuse_box'])
@@ -331,6 +424,7 @@ def verify_window(app):
         player.progression.remove_boards()
         print("SURVIVAL_WINDOW_OK: engine Ctrl/W/Shift/E, stamina, safe exit, live inspection/catch, R cleanup")
         player.enabled = False
+        manager.scene_manager.horror.stop()  # Keep baseline lighting comparisons stationary.
         ghost.update = lambda: None  # Freeze AI only during image comparisons.
         ghost.position = (0, 0, -2)
         mouse.locked = False

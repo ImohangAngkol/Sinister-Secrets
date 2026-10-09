@@ -82,6 +82,8 @@ class GameplayPanel(Entity):
         self.scale = min(1, (aspect - .06) / 1.18)
 
     def _open(self, player, mode):
+        if hasattr(player,'horror'):
+            player.horror.cancel_active()
         self.player, self.mode = player, mode
         self.enabled = True
         self.confirming = False
