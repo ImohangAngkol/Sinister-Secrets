@@ -7,7 +7,8 @@ Python/Ursina first-person horror prototype.
 - W A S D - Move
 - Mouse - Look
 - Shift - Sprint
-- E - Interact
+- Hold Ctrl - Crouch (release to stand when headroom is clear)
+- E - Interact / enter wardrobe / leave hiding
 - F - Flashlight
 - R - Restart after death/win
 - Esc - Quit
@@ -22,6 +23,8 @@ Python/Ursina first-person horror prototype.
 - Ghost vision + hearing
 - A* waypoint navigation
 - Win / lose states
+- Sprint stamina and crouching
+- Wardrobe hiding with suspicious/witnessed ghost inspections
 
 Run with:
 
@@ -310,6 +313,159 @@ Modified files: `game/settings.py`, `game/world/environment.py`,
 Engine references: [Panda3D lighting and shadow mapping](https://docs.panda3d.org/1.10/python/programming/render-attributes/lighting),
 [generated shaders](https://docs.panda3d.org/1.10/python/programming/shaders/shader-generator),
 and [exponential fog](https://docs.panda3d.org/1.10/python/programming/render-attributes/fog).
+
+## Milestone 3: perception, searching and survival
+
+Development started from clean `main` commit `af6b65a`, with all 46 existing
+tests passing. All original test cases remain; sensor fixtures now emit discrete
+sound events and wait for detection buildup. State/recovery tests use the new
+search duration and bounded AI timestep. The suite adds 23 survival regressions
+for **69 tests**. The haunted-house footprint, room connections, waypoint graph,
+pickups and exit objectives remain intact. Milestone 2.5's ambient light, flashlight
+brightness, attenuation, shadows and fog settings are unchanged.
+
+Vision still requires horizontal FOV, distance and real collider LOS; walls and
+closed doors block it. Darkness and crouching reduce the detection distance and
+buildup rate. The lit flashlight raises visibility, including its actual dark
+flicker intervals. Detection accumulates while the target is visible and decays
+when occluded. A ghost examines a silhouette before acquiring it, rather than
+instantly chasing. Confirmed CHASE retains the existing close-range LOS catch.
+
+Footsteps are immutable position/strength/time events emitted at actual movement
+substeps. Sprinting emits louder pulses than walking; crouching emits quieter,
+less frequent pulses. Pushing a wall emits nothing and spends no stamina.
+Unheard/old events expire after 1.5 seconds; a bounded queue prevents buildup.
+Hearing uses each recorded source rather than the player's current position,
+attenuates through obstructing colliders, and accepts new investigation sources
+at most once per 0.8 seconds. Focus loss and restart clear pending noises.
+These are gameplay noise events; no audio assets or audio playback was added.
+
+The existing five states now behave as follows:
+
+| State | Behavior |
+| --- | --- |
+| PATROL | Uses existing meaningful room destinations and collision-aware A* |
+| INVESTIGATE | Travels to an accepted sound snapshot or a witnessed wardrobe entrance |
+| SEARCH | Visits reachable nearby waypoints and plausible wardrobes, with a bounded 14-second budget |
+| CHASE | Pursues visible players at 5.9 units/s; after LOS breaks, follows the last seen location and then searches |
+| JUMPSCARE | Catches through unobstructed close-range LOS, or after physically reaching and inspecting the occupied wardrobe |
+
+Last-known position expires after 12 seconds without fresh evidence. Search
+uncertainty starts at 0.3 units for sight / 1.8 for sound and grows at 0.6 units/s;
+the candidate radius expands around that belief. Searches never query hidden
+occupancy to choose destinations. An empty wardrobe does not reveal occupants
+elsewhere. Existing edge validation, width sweeps, stuck replanning and four-second
+no-route recovery remain. AI substeps at most 1/30 second preserve elapsed time
+and reduce FPS-dependent transitions. The ghost never teleports.
+
+Two existing bedroom cabinets now have `hiding: true` in level data and hollow
+placeholder walls with a narrow viewing slit. Their footprints and solid outside
+colliders are unchanged. Aim at a wardrobe and press E to enter; E exits without
+requiring another ray hit. Hidden players cannot walk, crouch further or sprint;
+mouse turning is limited to +/-25 degrees yaw and +/-20 pitch. Entry requires
+a safe return position, and leaving validates candidate positions, floor support,
+body clearance and exit sweeps. If every exit is obstructed, it waits and displays
+feedback instead of clipping through the wall. Reentry has a one-second delay.
+
+An unseen hidden player is not a normal vision/catch target. A ghost that sees
+entry remembers that wardrobe and may inspect it. Suspicious searches can inspect
+nearby wardrobes regardless of occupancy. Inspection takes 1.5 seconds after
+reaching the entrance with a clear ray, with a HUD warning and an opportunity to
+leave. Reentering an actively checked wardrobe cannot restart the inspection.
+After 12 seconds hiding, breathing noise starts and repeats every three seconds;
+passing patrols can hear it and investigate. No arbitrary global hiding timeout
+or automatic through-wall capture was added.
+
+Stamina is shown in the existing inventory HUD. Configuration is in
+`game/settings.py`:
+
+| Setting | Default |
+| --- | --- |
+| Walk / sprint / crouch speed | 5 / 8 / 2.2 units/s |
+| Maximum stamina | 100 |
+| Actual sprint drain | 22 points/s (about 4.55 seconds from full) |
+| Recovery | 15 points/s after a one-second delay |
+| Exhaustion release threshold | 25 points |
+| Detection buildup base | 0.65 seconds, slower at distance/in darkness/when crouched |
+| Ghost chase / search speed | 5.9 / 2.2 units/s |
+
+Drain, recovery, noise and movement use elapsed substeps, including depletion
+partway through a slow frame. A depleted player walks until enough stamina is
+restored, avoiding rapid sprint/walk oscillation. Ctrl lowers the camera smoothly
+and updates the actual body collider. Standing checks headroom over the whole
+footprint; changing stance also checks destination headroom to prevent the two
+controller rays from straddling a thin low ceiling. Floor normals are normalized
+when validating hiding exits because Panda's transformed normals retain scale.
+
+Validation covers LOS/closed doors, discrete hearing and cooldown, memory and
+lost sight, connected searching, safe/blocked exits, unwitnessed/witnessed hiding,
+empty wardrobe checks, escape during inspection, reentry abuse, breathing risk,
+stamina, crouch headroom, and restart/focus cleanup. Movement, stamina, crouch
+camera/noise and detection buildup are compared at simulated 4/30/60/120 FPS.
+The original collision, navigation recovery, flashlight pixel/shadow, inventory
+and escape tests remain included.
+
+The native smoke harness launches the real main.py and dispatches Ctrl/W/Shift/E,
+checks stamina drain/recovery, enters/exits a wardrobe, and runs live witnessed
+inspection through capture and R restart. It poses fixtures, freezes AI during
+movement setup, and uses fixed timesteps; this is scripted engine testing, not
+a human playthrough. It also retains resizing, six original R restarts and all
+nine OFF/ON lighting comparisons. Native survival screenshots are
+`render_survival_{crouch,sprint,wardrobe,hidden,inspection,caught}.png` in the
+existing ignored test screenshot location.
+
+Final checks passed: all 69 tests in 51.7 seconds, compilation and
+`git diff --check`. The final native live-AI startup sample measured 7.04 ms
+median / 11.22 ms p95 per task-manager frame on the RTX 3050 Laptop GPU. This
+short sample does not establish lower-end laptop performance or longer-session
+stability. Existing PNG-profile, missing-icon and programmatic foreground
+warnings remain; no new shader errors or gameplay exceptions were observed.
+
+Known limits: visibility uses stance/flashlight/distance heuristics rather than
+sampling illumination on the player; sound obstruction uses one ray and a
+multiplier rather than acoustic propagation. The ghost cannot operate doors.
+Wardrobe entry is immediate, without an animation. AI/stamina/hiding balance,
+physical pointer input, actual Alt+Tab, prolonged sessions and lower-end hardware
+still need human testing. No unresolved failure remains in the automated cases.
+
+Milestone 3 modified files:
+
+| Area | Files |
+| --- | --- |
+| Configuration | `game/settings.py`, `game/levels/haunted_house.json` |
+| Player/survival | `game/player/player.py`, `game/player/player_stats.py`, `game/player/camera_controller.py`, `game/player/interaction.py` |
+| AI/perception | `game/ghost/ghost_ai.py`, `game/ghost/ghost_vision.py`, `game/ghost/ghost_hearing.py`, `game/ghost/ghost.py` |
+| Wardrobes/world | `game/world/room.py`, `game/world/house.py` |
+| Lifecycle/HUD | `game/scene_manager.py`, `game/game_manager.py`, `game/ui/inventory_ui.py` |
+| Verification | `game/tests/test_prototype.py`, `game/tests/windowed_smoke.py`, `README.md` |
+
+Milestone 3 manual checks after launching normally:
+
+1. Hold Ctrl while moving through a room; release it to stand. Confirm lower
+   view, slower movement and intact wall/furniture collisions. The current house
+   has no deliberate crouch-only passage; regression fixtures test low headroom.
+2. Shift-sprint through clear corridors, observe stamina drain, then walk/rest
+   to recover. At exhaustion, confirm walking until 25% charge. Pushing a wall
+   should generate neither new footstep events nor sprint drain.
+3. Break ghost LOS around a doorway and take another loop. It should investigate
+   remembered evidence and search reachable rooms rather than track through walls.
+4. In either bedroom, aim at the tall brown wardrobe and press E. Try WASD and
+   turning the mouse; movement must stay locked and viewing limited. E should
+   return to clear floor. Inspect the HUD after resizing while hidden/crouched.
+5. Enter unseen, then compare entering while watched. A witnessed entry should
+   prompt an inspection; leave during its warning and sprint away. Reentry must
+   not reset an active inspection. Staying more than 12 seconds creates periodic
+   breathing noise; a nearby patrol may investigate, rather than instant capture.
+6. Repeat win/loss and R from crouching/hiding/exhaustion. Confirm fresh stamina,
+   inventory, camera, AI memory and wardrobes. Alt+Tab while hidden to verify
+   pause/capture restoration. Complete the existing key/battery/exit checks below.
+
+Milestone 4 recommendations: first human-playtest evasion routes, discovery and
+stamina economy, run longer restart/focus soaks, and profile a lower-end laptop.
+Then add inspectable clues and a small authored puzzle with explicit item/exit
+softlock tests. Improve SEARCH coverage and sound propagation from observed
+playtest problems, and scope hiding animation/door handling separately. Saving,
+new levels and imported/audio assets remain future work.
 
 ## Manual verification
 

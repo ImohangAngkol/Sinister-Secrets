@@ -19,6 +19,8 @@ class House(Entity):
         data = self.level.house
         self.room_graph = room_connections(data)
         self.rooms = {room["id"]: Room(room, parent=self) for room in data["rooms"]}
+        self.hiding_spots = tuple(prop.hiding_spot for room in self.rooms.values()
+                                  for prop in room.props if hasattr(prop, "hiding_spot"))
         self.player_spawn = Vec3(*self.level.spawns["player"]["position"])
         self.ghost_spawn = Vec3(*self.level.spawns["ghost"]["position"])
         self.walls = []

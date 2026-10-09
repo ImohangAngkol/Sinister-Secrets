@@ -66,6 +66,7 @@ class GameManager(Entity):
         mouse.velocity = Vec3(0, 0, 0)
         self.scene_manager.player.stats.noise_level = 0
         if not focused:
+            self.scene_manager.player.stats.noise_events.clear()
             self._paused_before_focus = application.paused
             self._mouse_before_focus = mouse.enabled
             self._focus_paused = True

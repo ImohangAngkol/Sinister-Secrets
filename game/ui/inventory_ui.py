@@ -47,6 +47,9 @@ class InventoryUI(Text):
             f"{flashlight_text}\n"
             f"Keys: "
             f"{player.inventory.key_count()}"
+            f"\nStamina: {int(player.stats.stamina)}%"
+            f"{' (exhausted)' if player.stats.sprint_exhausted else ''}"
+            f"{'\nHidden: E to leave' if player.hidden else '\nCrouching' if player.crouching else ''}"
         )
         if self.text != text:
             self.text = text

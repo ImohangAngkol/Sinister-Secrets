@@ -27,7 +27,8 @@ from game.items.flashlight import FlashlightPickup
 from game.items.key import KeyPickup
 from game.player.interaction import get_interaction_hit
 from game.settings import (FLASHLIGHT_COLOR, FLASHLIGHT_DRAIN_PER_SECOND, FLASHLIGHT_FOV,
-                           FLASHLIGHT_RANGE, HOUSE_FOG_DENSITY, MAX_BATTERY)
+                           FLASHLIGHT_RANGE, HOUSE_FOG_DENSITY, MAX_BATTERY,
+                           GHOST_ACTIVE_SEARCH_SECONDS, STAMINA_MAX)
 from game.ghost.ghost_navigation import GhostNavigation
 from game.world.environment import world_raycast
 
@@ -286,20 +287,28 @@ class PrototypeTests(unittest.TestCase):
         self.player.stats.noise_level = 0
         self.assertFalse(can_hear_player(self.ghost, self.player))
         self.player.stats.noise_level = 8
+        self.player.stats.emit_noise(self.player.world_position, 8)
         self.assertTrue(can_hear_player(self.ghost, self.player))
         ai = self.ghost.ai
+        closest = float("inf")
         with patch("game.ghost.ghost_ai.can_see_player", return_value=False), \
                 patch("game.ghost.ghost_ai.can_hear_player", return_value=True):
             for _ in range(900):
                 time.dt = 1 / 60
+                self.player.stats.advance(time.dt)
+                if _ % 30 == 0:
+                    self.player.stats.emit_noise(self.player.world_position, 8)
                 old = Vec3(self.ghost.world_position)
                 ai.update()
                 self.assertTrue(ai.navigation.segment_clear(old, self.ghost.world_position))
-        self.assertLess((self.ghost.world_position - self.player.world_position).length(), 0.2)
+                closest = min(closest, (self.ghost.world_position - self.player.world_position).length())
+        self.assertLess(closest, 0.2)  # Reach the repeated sources, then actively search.
 
     def test_ai_states_and_jumpscare_once(self):
         ai = self.ghost.ai
         self.assertEqual(ai.state, GhostState.PATROL)
+        self.player.position = self.ghost.position + Vec3(0, 0, 2)
+        self.player.stats.emit_noise(self.player.world_position, 8)
         with patch("game.ghost.ghost_ai.can_see_player", return_value=False), \
                 patch("game.ghost.ghost_ai.can_hear_player", return_value=True):
             ai.update()
@@ -309,20 +318,24 @@ class PrototypeTests(unittest.TestCase):
                 patch("game.ghost.ghost_ai.can_hear_player", return_value=False):
             ai.update()
             self.assertEqual(ai.state, GhostState.SEARCH)
-            time.dt = 5
+            time.dt = GHOST_ACTIVE_SEARCH_SECONDS + 1
             ai.update()
             self.assertEqual(ai.state, GhostState.PATROL)
         self.ghost.position = Vec3(-6, 0, -8)
         self.player.position = Vec3(-6, 0, -5)
         self.ghost.rotation_y = 0
         time.dt = 1 / 60
-        ai.update()
+        for _ in range(120):
+            ai.update()
+            if ai.state == GhostState.CHASE:
+                break
         self.assertEqual(ai.state, GhostState.CHASE)
-        self.player.position = Vec3(-6, 0, -4)
+        self.player.position = Vec3(6, 0, -4)  # Real wall now breaks LOS too.
         with patch("game.ghost.ghost_ai.can_see_player", return_value=False):
             time.dt = 3
             ai.update()
             self.assertEqual(ai.state, GhostState.SEARCH)
+        self.ghost.position = Vec3(-6, 0, -6)
         self.player.position = self.ghost.position + Vec3(0, 0, 0.8)
         self.ghost.rotation_y = 0
         ai.state = GhostState.CHASE
@@ -340,6 +353,8 @@ class PrototypeTests(unittest.TestCase):
         for fps in (4, 30, 60, 120):
             for sprinting, speed, noise in ((False, 5, 3), (True, 8, 8)):
                 with self.subTest(fps=fps, sprinting=sprinting):
+                    self.player.stats.stamina = STAMINA_MAX
+                    self.player.stats.sprint_exhausted = False
                     self.player.position = Vec3(0, 0, -10)
                     self.player.rotation_y = 0
                     held_keys["shift"] = int(sprinting)
@@ -495,13 +510,18 @@ class PrototypeTests(unittest.TestCase):
                 ai.nav_nodes, ai.graph = nodes, graph
                 ai.state = GhostState.PATROL
                 ai.repath_time = ai.recovery_time = 0
+                ai.detection = 1 if sees_player else 0  # An already acquired visual target.
+                self.player.stats.emit_noise(self.player.world_position, 8)
+                # Sensor injection isolates routing against the test-root wall.
                 with patch("game.ghost.ghost_ai.can_see_player", return_value=sees_player), \
-                        patch("game.ghost.ghost_ai.can_hear_player", return_value=True):
-                    time.dt = 0.1
+                        patch("game.ghost.ghost_ai.can_hear_player", return_value=True), \
+                        patch("game.ghost.ghost_ai.heard_noise", return_value=self.player.stats.noise_events[-1]):
+                    self.ghost.position = nodes[0]
+                    time.dt = 1 / 30
                     ai.update()
                     self.assertEqual(ai.state, GhostState.SEARCH)
                     self.assertEqual(ai.recovery_time, 4)
-                    for _ in range(10):
+                    for _ in range(30):
                         ai.update()
                     self.assertEqual(ai.state, GhostState.SEARCH)
                     self.assertAlmostEqual(ai.recovery_time, 3)
@@ -934,6 +954,425 @@ class PrototypeTests(unittest.TestCase):
                 if (self.ghost.position - self.house.nav_nodes["storage"]).length() < 0.1:
                     break
         self.assertLess((self.ghost.position - self.house.nav_nodes["storage"]).length(), 0.1)
+
+
+    def hide_in(self, spot):
+        self.player.position = spot.approach
+        self.player.rotation_y = 0
+        self.player.camera_pivot.rotation_x = 0
+        self.player.camera_pivot.y = 1.8
+        camera.rotation = Vec3(0, 0, 0)
+        self.aim(spot.prop.world_position + Vec3(0, 1, 0))
+        self.assertIs(get_interaction_hit(self.player).entity, spot.prop)
+        self.player.input("e")
+        self.assertTrue(self.player.hidden)
+
+    def test_survival_vision_visibility_and_closed_door_occlusion(self):
+        self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -10), 0
+        self.player.position = Vec3(0, 0, -3)
+        self.assertTrue(can_see_player(self.ghost, self.player))
+        self.player.crouching = True
+        self.assertFalse(can_see_player(self.ghost, self.player))
+        self.player.obtain_flashlight()
+        self.player.toggle_flashlight()
+        self.assertTrue(can_see_player(self.ghost, self.player))
+        self.ghost.position = Vec3(0, 0, 16.3)
+        self.player.position = Vec3(0, 0, 19)
+        self.assertFalse(has_line_of_sight(self.ghost, self.player))
+        self.house.exit_door.open()
+        time.dt = 0.8
+        self.house.exit_door.update()
+        self.assertTrue(has_line_of_sight(self.ghost, self.player))
+
+    def test_survival_detection_buildup_at_four_frame_rates(self):
+        from game.settings import GHOST_DETECTION_SECONDS, GHOST_VISION_DISTANCE
+        self.player.position = Vec3(0, 0, -5)
+        self.player.obtain_flashlight()
+        self.player.toggle_flashlight()
+        expected = GHOST_DETECTION_SECONDS / (0.45 + 0.55 * (1 - 5 / GHOST_VISION_DISTANCE))
+        ai = self.ghost.ai
+        for fps in (4, 30, 60, 120):
+            self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -10), 0
+            ai.state, ai.detection, ai.recovery_time = GhostState.PATROL, 0, 0
+            elapsed = 0
+            while ai.state != GhostState.CHASE and elapsed < 3:
+                time.dt = 1 / fps
+                ai.update()
+                elapsed += time.dt
+            self.assertEqual(ai.state, GhostState.CHASE)
+            self.assertGreaterEqual(elapsed + 1e-7, expected)
+            self.assertLessEqual(elapsed, expected + 1 / fps + 1 / 30)
+            self.assertEqual(ai.last_known_player_position, self.player.position)
+
+    def test_survival_partial_detection_decays_behind_wall(self):
+        self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -9), 0
+        self.player.position = Vec3(0, 0, -6)
+        time.dt = 0.25
+        self.ghost.ai.update()
+        self.assertGreater(self.ghost.ai.detection, 0)
+        self.assertNotEqual(self.ghost.ai.state, GhostState.CHASE)
+        self.player.position = Vec3(3, 0, -9)
+        self.assertFalse(can_see_player(self.ghost, self.player))
+        time.dt = 0.5
+        self.ghost.ai.update()
+        self.assertEqual(self.ghost.ai.detection, 0)
+        self.assertNotEqual(self.manager.state, "dead")
+
+    def test_survival_noise_snapshot_is_not_live_tracking_and_expires(self):
+        from dataclasses import FrozenInstanceError
+        self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -9), 180
+        self.player.position = Vec3(0, 0, -6)
+        event = self.player.stats.emit_noise(self.player.position, 8)
+        source = Vec3(*event.position)
+        with self.assertRaises(FrozenInstanceError):
+            event.strength = 0
+        self.player.position = Vec3(-14, 0, 6)
+        self.assertTrue(can_hear_player(self.ghost, self.player))
+        time.dt = 1 / 60
+        self.ghost.ai.update()
+        self.assertEqual(self.ghost.ai.state, GhostState.INVESTIGATE)
+        self.assertEqual(self.ghost.ai.last_known_player_position, source)
+        self.player.position = Vec3(14, 0, 6)
+        for _ in range(30):
+            self.ghost.ai.update()
+        self.assertEqual(self.ghost.ai.last_known_player_position, source)
+        self.player.stats.advance(1.6)
+        self.assertFalse(can_hear_player(self.ghost, self.player))
+        self.assertFalse(self.player.stats.noise_events)
+
+    def test_survival_sound_strength_and_wall_attenuation(self):
+        self.ghost.position = Vec3(1, 0, -9)
+        source = Vec3(7, 0, -9)
+        for strength, heard in ((0.7, False), (3, False), (8, True)):
+            self.player.stats.noise_events.clear()
+            self.player.stats.emit_noise(source, strength)
+            self.assertEqual(can_hear_player(self.ghost, self.player), heard)
+
+    def test_survival_wall_pushing_emits_no_sound_or_stamina_drain(self):
+        self.player.position, self.player.rotation_y = Vec3(1.4, 0, -9), 90
+        held_keys["shift"] = 1
+        self.move("w", seconds=1, dt=0.25)
+        self.assertEqual(self.player.stats.stamina, 100)
+        self.assertEqual(self.player.stats.noise_level, 0)
+        self.assertFalse(self.player.stats.noise_events)
+        self.player.position, self.player.rotation_y = Vec3(0, 0, -10), 0
+        self.move("w", seconds=0.5)
+        self.assertTrue(self.player.stats.noise_events)
+        for event in self.player.stats.noise_events:
+            self.assertEqual(event.strength, 8)
+            self.assertGreater(event.position[2], -10)
+
+    def test_survival_chase_uses_last_seen_location_after_losing_sight(self):
+        ai = self.ghost.ai
+        self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -10), 0
+        self.player.position = Vec3(0, 0, -6)
+        ai.state = GhostState.CHASE
+        time.dt = 1 / 60
+        ai.update()
+        remembered = Vec3(ai.last_known_player_position)
+        self.player.position = Vec3(-14, 0, 6)
+        for _ in range(90):
+            before = Vec3(self.ghost.position)
+            ai.update()
+            self.assertTrue(ai.navigation.segment_clear(before, self.ghost.position))
+        self.assertEqual(ai.last_known_player_position, remembered)
+        self.assertEqual(ai.state, GhostState.SEARCH)
+        self.assertEqual(self.manager.state, "playing")
+
+    def test_survival_search_visits_waypoints_and_memory_expires(self):
+        ai = self.ghost.ai
+        self.player.position = Vec3(-14, 0, 6)
+        self.ghost.position = Vec3(0, 0, -2)
+        ai._remember(Vec3(0, 0, -2), 1.8)
+        ai._start_search()
+        start = Vec3(self.ghost.position)
+        with patch("game.ghost.ghost_ai.can_see_player", return_value=False):
+            for _ in range(240):
+                time.dt = 1 / 30
+                before = Vec3(self.ghost.position)
+                ai.update()
+                self.assertTrue(ai.navigation.segment_clear(before, self.ghost.position))
+        self.assertGreater((self.ghost.position - start).length(), 1)
+        self.assertGreaterEqual(len(ai.searched_nodes), 2)
+        self.assertGreater(ai.memory_uncertainty, 1.8)
+        ai.recovery_time = ai.search_time = 50
+        time.dt = 5
+        ai.update()
+        self.assertIsNone(ai.last_known_player_position)
+
+    def test_survival_hiding_entry_exit_prompts_and_body_clearance(self):
+        self.assertEqual(len(self.house.hiding_spots), 2)
+        for spot in self.house.hiding_spots:
+            self.hide_in(spot)
+            self.assertIs(spot.occupant, self.player)
+            time.dt = 0.25
+            held_keys["w"] = held_keys["shift"] = 1
+            mouse.velocity = Vec3(100, 100, 0)
+            position = Vec3(self.player.position)
+            self.player.update()
+            self.assertEqual(self.player.position, position)
+            self.assertEqual(self.player.stats.noise_level, 0)
+            self.assertLessEqual(abs(self.player.rotation_y - spot.view_yaw), 25)
+            self.assertLessEqual(abs(self.player.camera_pivot.rotation_x), 20)
+            self.assertFalse(can_see_player(self.ghost, self.player))
+            self.capture("render_survival_hidden.png")
+            self.player.input("e")
+            self.assertFalse(self.player.hidden)
+            self.assertIsNone(spot.occupant)
+            self.assertTrue(self.player.can_occupy(self.player.position, 1))
+            self.assertFalse(self.player.enter_hiding(spot))  # Reentry cooldown.
+            held_keys.clear()
+            mouse.velocity = Vec3(0, 0, 0)
+            time.dt = 1.1
+            self.player.update()
+
+    def test_survival_hiding_exit_uses_safe_alternative_when_blocked(self):
+        spot = self.house.hiding_spots[0]
+        self.hide_in(spot)
+        Entity(parent=self.house, model="cube", collider="box", position=spot.approach + Vec3(0, 1, 0),
+               scale=(0.6, 2, 0.6))
+        self.player.input("e")
+        self.assertFalse(self.player.hidden)
+        self.assertTrue(self.player.can_occupy(self.player.position, 1))
+        self.assertGreater((self.player.position - spot.approach).length(), 0.5)
+
+    def test_survival_unwitnessed_hiding_is_not_automatic_detection(self):
+        spot = self.house.hiding_spots[0]
+        self.hide_in(spot)
+        self.assertIsNone(self.ghost.ai.suspected_hiding_spot)
+        self.ghost.position, self.ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        self.player.stats.noise_events.clear()
+        time.dt = 1 / 60
+        for _ in range(120):
+            self.player.update()
+            self.ghost.ai.update()
+        self.assertEqual(self.manager.state, "playing")
+        self.assertNotEqual(self.ghost.ai.state, GhostState.CHASE)
+        self.assertIsNone(self.ghost.ai.suspected_hiding_spot)
+
+    def test_survival_witnessed_hiding_is_inspected_before_catching(self):
+        spot = self.house.hiding_spots[0]
+        self.ghost.position, self.ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        self.hide_in(spot)
+        ai = self.ghost.ai
+        self.assertIs(ai.suspected_hiding_spot, spot)
+        self.assertEqual(ai.state, GhostState.INVESTIGATE)
+        time.dt = 1 / 60
+        for _ in range(60):
+            ai.update()
+        self.assertEqual(self.manager.state, "playing")
+        for _ in range(240):
+            ai.update()
+            if self.manager.state == "dead":
+                break
+        self.assertEqual(self.manager.state, "dead")
+        self.assertEqual(ai.state, GhostState.JUMPSCARE)
+
+    def test_survival_breathing_creates_risk_and_guides_search(self):
+        from game.settings import HIDING_SAFE_SECONDS, HIDING_NOISE_INTERVAL
+        spot = self.house.hiding_spots[0]
+        self.hide_in(spot)
+        self.player.stats.noise_events.clear()
+        time.dt = HIDING_SAFE_SECONDS - 0.1
+        self.player.update()
+        self.assertFalse(self.player.stats.noise_events)
+        time.dt = 0.2
+        self.player.update()
+        event = self.player.stats.noise_events[-1]
+        self.assertEqual(event.kind, "breathing")
+        self.assertEqual(Vec3(*event.position), self.player.world_position)
+        self.ghost.position, self.ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        time.dt = 1 / 60
+        self.ghost.ai.update()
+        self.assertIs(self.ghost.ai.suspected_hiding_spot, spot)
+        time.dt = HIDING_NOISE_INTERVAL
+        self.player.update()
+        self.assertGreater(self.player.stats.noise_events[-1].sequence, event.sequence)
+
+    def test_survival_inspection_cannot_catch_through_a_wall(self):
+        spot = self.house.hiding_spots[0]
+        self.hide_in(spot)
+        ai = self.ghost.ai
+        self.ghost.position = spot.approach - Vec3(1.2, 0, 0)
+        ai.inspection_target = spot
+        ai.navigation.clear()
+        self.assertFalse(ai._inspection_clear(spot))
+        time.dt = 2
+        ai._inspect_hiding_spot()
+        self.assertEqual(self.manager.state, "playing")
+
+    def test_survival_stamina_depletion_and_recovery_at_four_frame_rates(self):
+        from game.player.player_stats import PlayerStats
+        from game.settings import STAMINA_DRAIN_PER_SECOND
+        Entity(model="cube", collider="box", position=(60, -0.15, 0), scale=(20, 0.3, 200))
+        reference = None
+        for fps in (4, 30, 60, 120):
+            self.player.stats = PlayerStats()
+            self.player.position, self.player.rotation_y = Vec3(60, 0, -80), 0
+            self.player.camera_pivot.rotation_x = 0
+            held_keys["shift"] = 1
+            self.move("w", seconds=5, dt=1 / fps)
+            self.assertEqual(self.player.stats.stamina, 0)
+            self.assertTrue(self.player.stats.sprint_exhausted)
+            sprint_time = 100 / STAMINA_DRAIN_PER_SECOND
+            self.assertAlmostEqual(self.player.z, -80 + sprint_time * 8 + (5 - sprint_time) * 5, delta=0.04)
+            held_keys.clear()
+            for _ in range(4 * fps):
+                self.player.update()
+            self.assertGreater(self.player.stats.stamina, 25)
+            self.assertFalse(self.player.stats.sprint_exhausted)
+            result = (self.player.z, self.player.stats.stamina)
+            if reference is None:
+                reference = result
+            for value, expected in zip(result, reference):
+                self.assertAlmostEqual(value, expected, delta=0.04)
+
+    def test_survival_crouch_speed_camera_noise_and_low_ceiling(self):
+        from game.settings import PLAYER_CROUCH_SPEED, PLAYER_CROUCH_NOISE
+        reference = None
+        for fps in (4, 30, 60, 120):
+            self.player.position, self.player.rotation_y = Vec3(0, 0, -10), 0
+            self.player.camera_pivot.y = 1.8
+            self.player.camera_pivot.rotation_x = 0
+            self.player.set_body_height(1.8)
+            held_keys["control"] = held_keys["shift"] = 1
+            self.move("w", seconds=1, dt=1 / fps)
+            self.assertAlmostEqual(self.player.z, -10 + PLAYER_CROUCH_SPEED, delta=0.002)
+            self.assertAlmostEqual(self.player.stats.noise_level, PLAYER_CROUCH_NOISE, delta=0.002)
+            self.assertAlmostEqual(self.player.camera_pivot.y, 1, delta=0.001)
+            self.assertFalse(self.player.sprinting)
+            if reference is None:
+                reference = self.player.camera_pivot.y
+            self.assertAlmostEqual(self.player.camera_pivot.y, reference, delta=0.001)
+        roof = Entity(model="cube", collider="box", position=(0, 1.35, -7.8), scale=(2, 0.2, 2))
+        held_keys.clear()
+        self.player.update()
+        self.assertTrue(self.player.crouching)
+        self.assertFalse(self.player.can_stand())
+        self.assertLessEqual(self.player.height, 1.01)
+        destroy(roof)
+        for _ in range(120):
+            time.dt = 1 / 60
+            self.player.update()
+        self.assertFalse(self.player.crouching)
+        self.assertEqual(self.player.height, 1.8)
+
+    def test_survival_restart_cleans_hidden_stamina_memory_and_events(self):
+        for won in (False, True):
+            player = self.manager.scene_manager.player
+            spot = self.manager.scene_manager.house.hiding_spots[0]
+            player.position = spot.approach
+            self.assertTrue(player.enter_hiding(spot))
+            player.stats.stamina = 0
+            player.stats.sprint_exhausted = True
+            (self.manager.win_game if won else self.manager.game_over)()
+            self.assertIsNone(spot.occupant)
+            self.manager.input("r")
+            fresh = self.manager.scene_manager.player
+            self.assertFalse(fresh.hidden or fresh.crouching)
+            self.assertEqual(fresh.stats.stamina, 100)
+            self.assertFalse(fresh.stats.noise_events)
+            self.assertIsNone(self.manager.scene_manager.ghost.ai.last_known_player_position)
+            self.assertTrue(fresh.enabled)
+
+    def test_survival_empty_wardrobe_search_does_not_reveal_another_occupant(self):
+        first, second = self.house.hiding_spots
+        self.hide_in(second)
+        self.player.stats.noise_events.clear()
+        self.ghost.position = Vec3(4.6, 0, -11.2)
+        ai = self.ghost.ai
+        ai._remember(first.approach, 1.8)
+        ai._start_search()
+        self.assertIs(ai.inspection_target, first)
+        for _ in range(180):
+            time.dt = 1 / 60
+            ai.update()
+        self.assertEqual(self.manager.state, "playing")
+        self.assertTrue(self.player.hidden)
+        self.assertIsNot(ai.inspection_target, first)
+        self.assertEqual(ai.last_known_player_position, first.approach)
+
+    def test_survival_player_can_leave_during_a_witnessed_inspection(self):
+        spot = self.house.hiding_spots[0]
+        self.ghost.enabled = True  # Real ghost collider blocks the front exit.
+        self.ghost.position, self.ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        self.hide_in(spot)
+        for _ in range(60):
+            time.dt = 1 / 60
+            self.ghost.ai.update()
+        self.assertEqual(self.manager.state, "playing")
+        self.player.input("e")
+        self.assertFalse(self.player.hidden)
+        held_keys["shift"] = held_keys["d"] = 1
+        for _ in range(30):
+            self.player.update()
+            self.ghost.ai.update()
+        self.assertEqual(self.manager.state, "playing")
+        self.assertGreater((self.player.position - self.ghost.position).length(), 1.25)
+
+    def test_survival_all_obstructed_exits_wait_then_clear_without_wall_escape(self):
+        spot = self.house.hiding_spots[0]
+        self.hide_in(spot)
+        blockers = [Entity(parent=self.house, model="cube", collider="box",
+                           position=point + Vec3(0, 1, 0), scale=(0.8, 2, 0.8))
+                    for point in spot.exit_candidates()]
+        self.player.input("e")
+        self.assertTrue(self.player.hidden)
+        self.assertIn("obstructed", self.manager.hud.message.text)
+        self.assertEqual(self.player.position, spot.prop.world_position)
+        for blocker in blockers:
+            destroy(blocker)
+        self.player.input("e")
+        self.assertFalse(self.player.hidden)
+
+    def test_survival_noise_cooldown_and_focus_clear_stale_events(self):
+        self.ghost.position, self.ghost.rotation_y = Vec3(0, 0, -9), 180
+        ai = self.ghost.ai
+        source = Vec3(0, 0, -6)
+        self.player.position = source
+        self.player.stats.emit_noise(source, 8)
+        self.player.position = Vec3(-14, 0, 6)
+        time.dt = 1 / 60
+        ai.update()
+        self.assertEqual(ai.last_known_player_position, source)
+        self.player.stats.emit_noise(Vec3(0, 0, -5), 8)
+        ai.update()
+        self.assertEqual(ai.last_known_player_position, source)
+        self.assertGreater(ai.noise_cooldown, 0)
+        self.manager.set_focus(False)
+        self.assertFalse(self.player.stats.noise_events)
+        self.manager.set_focus(True)
+
+    def test_survival_lowering_camera_cannot_enter_a_low_ceiling_early(self):
+        roof = Entity(model="cube", collider="box", position=(0, 1.35, -8.7), scale=(2, 0.2, 2))
+        self.player.position, self.player.rotation_y = Vec3(0, 0, -10.1), 0
+        self.player.camera_pivot.rotation_x = 0
+        held_keys["control"] = held_keys["w"] = 1
+        for _ in range(30):
+            time.dt = 1 / 120
+            self.player.update()
+            if self.player.z + 0.325 > -9.7:
+                self.assertLess(self.player.height, 1.25)
+        self.assertGreater(self.player.z, -10.1)
+        destroy(roof)
+
+    def test_survival_reentering_watched_wardrobe_does_not_restart_inspection(self):
+        spot = self.house.hiding_spots[0]
+        self.ghost.position, self.ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        self.hide_in(spot)
+        ai = self.ghost.ai
+        ai._start_search()
+        self.assertIs(ai.inspection_target, spot)
+        ai.inspection_time = 0.7
+        self.player.input("e")
+        self.assertFalse(self.player.hidden)
+        time.dt = 1.1
+        self.player.update()  # Fixture freezes AI to isolate the reentry event.
+        self.player.input("e")
+        self.assertTrue(self.player.hidden)
+        self.assertEqual(ai.inspection_time, 0.7)
+        self.assertIs(ai.inspection_target, spot)
+        self.assertEqual(ai.state, GhostState.SEARCH)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,29 @@
-from ursina import BoxCollider, Entity, Text, color
+from ursina import BoxCollider, Entity, Text, Vec3, color
+
+
+class HidingSpot:
+    """Interaction metadata on an existing cabinet, with collision-safe exits."""
+    def __init__(self, prop, width, depth):
+        self.prop = prop
+        self.width, self.depth = width, depth
+        self.occupant = None
+        prop.hiding_spot = self
+        prop.interaction_text = "[E] Hide in wardrobe"
+        prop.interact = lambda player: player.enter_hiding(self)
+
+    @property
+    def view_yaw(self):
+        return self.prop.world_rotation_y + 180
+
+    @property
+    def approach(self):
+        return self.prop.world_position - self.prop.forward.normalized() * (self.depth / 2 + 0.8)
+
+    def exit_candidates(self):
+        front = self.approach
+        right = self.prop.right.normalized()
+        return (front, front + right * (self.width / 2 + 0.8), front - right * (self.width / 2 + 0.8),
+                front - self.prop.forward.normalized() * 0.6)
 
 
 class Room(Entity):
@@ -48,7 +73,19 @@ class Room(Entity):
             return Entity(parent=prop, model="cube", shader=None, position=position,
                           scale=scale, color=color.rgb32(*rgb))
 
-        if kind in ("table", "console", "bench"):
+        if definition.get("hiding"):
+            # Same footprint/collider as the old wardrobe. Hollow geometry
+            # places the crouched camera inside, behind a narrow viewing slit.
+            cube((-width / 2 + 0.025, height / 2, 0), (0.05, height, depth))
+            cube((width / 2 - 0.025, height / 2, 0), (0.05, height, depth))
+            cube((0, height / 2, depth / 2 - 0.025), (width, height, 0.05))
+            cube((0, height - 0.025, 0), (width, 0.05, depth))
+            for x in (-width / 4 - 0.045, width / 4 + 0.045):
+                cube((x, height / 2, -depth / 2 + 0.025), (width / 2 - 0.09, height, 0.05))
+            cube((0, 0.35, -depth / 2 + 0.025), (0.18, 0.7, 0.05))
+            cube((0, (1.5 + height) / 2, -depth / 2 + 0.025), (0.18, height - 1.5, 0.05))
+            HidingSpot(prop, width, depth)
+        elif kind in ("table", "console", "bench"):
             cube((0, height - 0.07, 0), (width, 0.14, depth))
             for x in (-width / 2 + 0.1, width / 2 - 0.1):
                 for z in (-depth / 2 + 0.1, depth / 2 - 0.1):

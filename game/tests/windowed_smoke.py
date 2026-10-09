@@ -17,7 +17,7 @@ loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 
 
 def verify_window(app):
-    from ursina import Vec3, application, camera, held_keys, mouse, scene
+    from ursina import Vec3, application, camera, held_keys, mouse, scene, time
     from game.game_manager import GameManager
 
     manager = next(entity for entity in scene.entities if isinstance(entity, GameManager))
@@ -113,8 +113,94 @@ def verify_window(app):
         charge = player.stats.battery
         frames(2)
         assert player.stats.battery == charge
-        player.enabled = False
+        # Survival checks use simulated input and fixed elapsed time in the
+        # actual main.py window. Pose fixtures explicitly; this is not manual play.
         ghost = manager.scene_manager.ghost
+        live_update = ghost.update
+        ghost.update = lambda: None
+        mouse_enabled = mouse.enabled
+        calculate_dt = application.calculate_dt
+        mouse.enabled = False
+        application.calculate_dt = False
+
+        def simulated_frames(count):
+            for _ in range(count):
+                time.dt = time.dt_unscaled = 1 / 60
+                frames(1)
+
+        player.position, player.rotation_y = Vec3(0, 0, -10), 0
+        player.camera_pivot.rotation_x = 10
+        camera.rotation = Vec3(0, 0, 0)
+        app.input("control", is_raw=True)
+        app.input("w", is_raw=True)
+        simulated_frames(30)
+        assert player.crouching and abs(player.z + 8.9) < 0.02
+        capture("render_survival_crouch.png")
+        app.input("w up", is_raw=True)
+        app.input("control up", is_raw=True)
+        simulated_frames(30)
+        assert not player.crouching and player.height > 1.79
+        app.input("shift", is_raw=True)
+        app.input("w", is_raw=True)
+        simulated_frames(60)
+        assert 77.9 < player.stats.stamina < 78.1
+        capture("render_survival_sprint.png")
+        app.input("w up", is_raw=True)
+        app.input("shift up", is_raw=True)
+        simulated_frames(120)
+        assert player.stats.stamina > 92.9
+
+        spot = house.hiding_spots[0]
+        player.position, player.rotation_y = spot.approach, 0
+        player.camera_pivot.rotation_x = math.degrees(math.atan2(player.height - 1, 1.2))
+        app.input("f", is_raw=True)
+        simulated_frames(2)
+        capture("render_survival_wardrobe.png")
+        app.input("f", is_raw=True)
+        app.input("e", is_raw=True)
+        assert player.hidden and spot.occupant == player
+        hidden_position = Vec3(player.position)
+        app.input("w", is_raw=True)
+        simulated_frames(30)
+        assert player.position == hidden_position
+        capture("render_survival_hidden.png")
+        app.input("w up", is_raw=True)
+        app.input("e", is_raw=True)
+        assert not player.hidden and player.can_occupy(player.position, 1)
+        simulated_frames(90)
+
+        # The live AI witnesses an entry, routes to that wardrobe and inspects
+        # it; normal hidden-player LOS stays false throughout.
+        player.position, player.rotation_y = spot.approach, 0
+        player.camera_pivot.rotation_x = math.degrees(math.atan2(player.height - 1, 1.2))
+        ghost.position, ghost.rotation_y = Vec3(4.6, 0, -11.2), -90
+        app.input("e", is_raw=True)
+        assert player.hidden and ghost.ai.suspected_hiding_spot == spot
+        ghost.update = live_update
+        simulated_frames(65)
+        assert manager.state == "playing" and ghost.ai.inspection_target == spot
+        capture("render_survival_inspection.png")
+        for _ in range(240):
+            simulated_frames(1)
+            if manager.state == "dead":
+                break
+        assert manager.state == "dead"
+        capture("render_survival_caught.png")
+        app.input("r", is_raw=True)
+        simulated_frames(2)
+        assert manager.state == "playing"
+        player, house, ghost = (manager.scene_manager.player, manager.scene_manager.house,
+                                manager.scene_manager.ghost)
+        assert not player.hidden and player.stats.stamina == 100
+        assert all(spot.occupant is None for spot in house.hiding_spots)
+        application.calculate_dt = calculate_dt
+        mouse.enabled = mouse_enabled
+        held_keys.clear()
+        # Restore the flashlight for the unchanged OFF/ON visual comparisons.
+        app.input("e", is_raw=True)
+        assert player.has_flashlight
+        print("SURVIVAL_WINDOW_OK: engine Ctrl/W/Shift/E, stamina, safe exit, live inspection/catch, R cleanup")
+        player.enabled = False
         ghost.update = lambda: None  # Freeze AI only during image comparisons.
         ghost.position = (0, 0, -2)
         mouse.locked = False

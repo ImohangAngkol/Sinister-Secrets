@@ -15,6 +15,7 @@ class Ghost(Entity):
         on_caught,
         collision_root=None,
         patrol_targets=None,
+        hiding_spots=(),
         **kwargs,
     ):
 
@@ -63,6 +64,7 @@ class Ghost(Entity):
             jumpscare=self.jumpscare,
             collision_root=collision_root,
             patrol_targets=patrol_targets,
+            hiding_spots=hiding_spots,
         )
 
     def update(self):

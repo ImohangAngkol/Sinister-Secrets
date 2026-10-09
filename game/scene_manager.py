@@ -42,7 +42,9 @@ class SceneManager:
             position=self.house.ghost_spawn,
             collision_root=self.house,
             patrol_targets=self.house.patrol_targets,
+            hiding_spots=self.house.hiding_spots,
         )
+        self.player.ghost_ai = self.ghost.ai
 
     def stop_gameplay(self):
         self.player.cleanup()

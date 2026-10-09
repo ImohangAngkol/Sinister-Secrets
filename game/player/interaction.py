@@ -14,6 +14,9 @@ def get_interaction_hit(player):
 
 
 def update_interaction_prompt(player):
+    if player.hidden:
+        player.hud.set_prompt("[E] Leave hiding spot")
+        return
     hit = get_interaction_hit(player)
 
     if hit.hit and hasattr(hit.entity, "interact"):
@@ -30,6 +33,9 @@ def update_interaction_prompt(player):
 
 
 def interact(player):
+    if player.hidden:
+        player.leave_hiding()
+        return
     hit = get_interaction_hit(player)
 
     if hit.hit and hasattr(hit.entity, "interact"):
