@@ -28,7 +28,7 @@ HIDING_REENTRY_DELAY = 1.0
 # FLASHLIGHT
 MAX_BATTERY = 100
 FLASHLIGHT_START_BATTERY = 65
-FLASHLIGHT_DRAIN_PER_SECOND = 3.5
+FLASHLIGHT_DRAIN_PER_SECOND = 0.25  # 400 seconds total with the authored 65+35 supply.
 LOW_BATTERY_THRESHOLD = 15
 
 # LIGHTING (normalized RGB intensities; lights may exceed 1, distances in units)
@@ -86,12 +86,35 @@ JUMPSCARE_SECONDS = 1.8
 JUMPSCARE_INTENSITY = 0.65  # 0 removes approach, shake, and darkening; catch still ends.
 JUMPSCARE_REDUCED_SHAKE = False
 JUMPSCARE_SHAKE_DEGREES = 0.45
+LOAD_GRACE_SECONDS = 5.0
+LOAD_GHOST_MIN_DISTANCE = 12.0
+SAVE_COOLDOWN_SECONDS = 10.0
 
 # User preferences are separate from level data and gameplay/save state.
 import json
 import math
 import os
 from pathlib import Path
+from copy import deepcopy
+
+BINDING_DEFAULTS = dict(forward='w', backward='s', left='a', right='d', sprint='shift',
+                        crouch='control', interact='e', flashlight='f', inventory='tab',
+                        use_item='u', pause='escape')
+SUPPORTED_BINDINGS = set('abcdefghijklmnopqrstuvwxyz') - {'r'}
+SUPPORTED_BINDINGS.update(('space','shift','control','tab','escape'))
+
+
+def validate_bindings(bindings):
+    if not isinstance(bindings, dict) or set(bindings) != set(BINDING_DEFAULTS):
+        raise ValueError('All control actions require bindings')
+    result = {}
+    for action, key in bindings.items():
+        if not isinstance(key, str) or key not in SUPPORTED_BINDINGS or key=='escape' and action!='pause':
+            raise ValueError('Unsupported/reserved key; Escape and menu keys remain reliable')
+        result[action] = key
+    if len(set(result.values())) != len(result):
+        raise ValueError('Conflicting key bindings')
+    return result
 
 PREFERENCES_PATH = Path(__file__).resolve().parent / "data" / "user_preferences.json"
 PREFERENCE_DEFAULTS = {
@@ -104,6 +127,8 @@ PREFERENCE_DEFAULTS = {
     "jumpscare_intensity": JUMPSCARE_INTENSITY,
     "ghost_difficulty": "standard",
     "fps_cap": 0,
+    "text_scale": 1.0,
+    "bindings": BINDING_DEFAULTS,
 }
 PREFERENCE_CHOICES = {
     "mouse_sensitivity": (.25, .5, .75, 1., 1.25, 1.5, 2., 3.),
@@ -115,6 +140,7 @@ PREFERENCE_CHOICES = {
     "jumpscare_intensity": (0., .25, .5, .65, .8, 1.),
     "ghost_difficulty": ("relaxed", "standard", "hard"),
     "fps_cap": (0, 30, 60, 120),
+    "text_scale": (1.0, 1.25, 1.5),
 }
 NEXT_GAME_SETTINGS = ("shadow_quality", "ghost_difficulty")
 GHOST_DIFFICULTY = {"relaxed": (.85, .8), "standard": (1., 1.), "hard": (1.1, 1.2)}
@@ -124,13 +150,18 @@ def validate_preferences(values):
     """Validate a partial configuration, retaining defaults for missing fields."""
     if not isinstance(values, dict) or set(values) - set(PREFERENCE_DEFAULTS):
         raise ValueError("Unknown preference or invalid configuration")
-    result = PREFERENCE_DEFAULTS.copy()
+    result = deepcopy(PREFERENCE_DEFAULTS)
     bounds = {"mouse_sensitivity": (.25, 3), "brightness": (.5, 2),
               "horror_frequency": (0, 3), "jumpscare_intensity": (0, 1)}
     for key, value in values.items():
-        if key in bounds:
+        if key == 'bindings':
+            result[key] = validate_bindings(value)
+            continue
+        if key == 'text_scale':
+            valid = type(value) in (int,float) and value in PREFERENCE_CHOICES[key]
+        elif key in bounds:
             low, high = bounds[key]
-            valid = (type(value) in (int, float) and math.isfinite(value) and low <= value <= high)
+            valid = (type(value) in (int, float) and low <= value <= high and math.isfinite(value))
         elif key in ("reduced_flicker", "reduced_shake"):
             valid = type(value) is bool
         elif key == "fps_cap":
@@ -147,7 +178,7 @@ class Preferences:
     """Validated, atomic local JSON preferences; never a checkpoint/save file."""
     def __init__(self, path=PREFERENCES_PATH):
         self.path = Path(path) if path is not None else None
-        self.values = PREFERENCE_DEFAULTS.copy()
+        self.values = deepcopy(PREFERENCE_DEFAULTS)
         self.error = ""
         if self.path is not None and self.path.exists():
             try:

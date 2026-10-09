@@ -27,6 +27,7 @@ class GhostAI:
         self.state = GhostState.PATROL
         self.speed_multiplier = 1.0
         self.detection_multiplier = 1.0
+        self.grace_time = 0.0
         self.navigation = GhostNavigation(ghost, nav_nodes, graph, collision_root, player)
         self.last_known_player_node = None
         self.last_known_player_position = None
@@ -66,6 +67,12 @@ class GhostAI:
 
     def _update_step(self):
         dt = time.dt
+        if self.grace_time > 0:
+            self.grace_time = max(0, self.grace_time-dt)
+            self.navigation.follow_path(GHOST_PATROL_SPEED * self.speed_multiplier)
+            if self.navigation.path_finished():
+                self._choose_random_patrol_target()
+            return
         self.repath_time = max(0, self.repath_time - dt)
         self.recovery_time = max(0, self.recovery_time - dt)
         self.noise_cooldown = max(0, self.noise_cooldown - dt)

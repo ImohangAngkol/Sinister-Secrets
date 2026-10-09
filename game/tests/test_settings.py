@@ -4,10 +4,35 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from game.settings import Preferences, PREFERENCE_DEFAULTS, validate_preferences
+from game.settings import Preferences, PREFERENCE_DEFAULTS, validate_preferences, validate_bindings, BINDING_DEFAULTS
 
 
 class SettingsTests(unittest.TestCase):
+    def test_bindings_reject_conflicts_reserved_and_unsupported_keys(self):
+        for action,key in (('forward','s'),('interact','escape'),('flashlight','enter'),
+                           ('pause','backspace'),('forward','r'),('forward','f13')):
+            values=dict(BINDING_DEFAULTS,**{action:key})
+            with self.subTest(action=action,key=key),self.assertRaises(ValueError):validate_bindings(values)
+
+    def test_rebound_controls_and_text_scale_persist(self):
+        with tempfile.TemporaryDirectory() as folder:
+            prefs=Preferences(Path(folder)/'prefs.json')
+            bindings=dict(BINDING_DEFAULTS,forward='i',pause='p')
+            prefs.save(dict(PREFERENCE_DEFAULTS,bindings=bindings,text_scale=1.5))
+            self.assertEqual(Preferences(prefs.path).values['bindings'],bindings)
+            self.assertEqual(Preferences(prefs.path).values['text_scale'],1.5)
+
+    def test_old_preferences_receive_new_defaults_and_are_independent(self):
+        old={key:value for key,value in PREFERENCE_DEFAULTS.items() if key not in ('bindings','text_scale')}
+        values=validate_preferences(old)
+        self.assertEqual(values['bindings'],BINDING_DEFAULTS)
+        values['bindings']['forward']='i'
+        self.assertEqual(BINDING_DEFAULTS['forward'],'w')
+
+    def test_ui_scaling_only_accepts_supported_values(self):
+        for value in (True,0,2,1.1,'1.5'):
+            with self.subTest(value=value),self.assertRaises(ValueError):validate_preferences({'text_scale':value})
+
     def test_defaults_preserve_milestone_five_values(self):
         values = validate_preferences({})
         self.assertEqual(values, PREFERENCE_DEFAULTS)

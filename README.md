@@ -17,6 +17,8 @@ Python/Ursina first-person horror prototype.
 - Esc - Close inventory/note/lock screen first; otherwise pause/resume. On an end screen, return to the main menu.
 - Menu Up/Down or Tab - Select; Enter or mouse click - Confirm
 - Settings Left/Right - Adjust; Apply and Back saves; Esc cancels
+- PgUp/PgDn - Menu pages and note pages
+- Controls/Rebind - Change gameplay keys; Escape always closes/cancels menus
 
 ## Prototype 0.1
 
@@ -48,6 +50,303 @@ into inventory and used deliberately. Read the living-room note to begin the
 fuse, combination, and crowbar sequence below. The yellow exit key remains
 inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
 with E, then walk through the opening to escape. The ghost uses placeholder geometry.
+
+## Milestone 7: saves, checkpoints, accessibility, and longer sessions
+
+Current implementation extends the existing modules and authored house. Earlier
+milestone sections below retain their original test/balance history. No external
+assets, new levels, puzzle changes, commits, pushes, or merges were added.
+Inspection began on clean `main`, commit `e1fe822`, in
+`C:\Users\User\Desktop\Sinister_Secrets`. Python 3.14.2, Ursina 8.3.0 and
+Panda3D 1.10.16 were used for validation.
+
+### Local save format and reliability
+
+`game/systems/save_manager.py` now implements schema **version 1**. Paths resolve
+relative to the project, independent of the working directory:
+
+- `game/data/manual_save.json`: the single manual slot.
+- `game/data/checkpoint_save.json`: the separate milestone snapshot.
+- `game/data/user_preferences.json`: preferences only; never gameplay progress.
+
+Gameplay saves and their `.json.tmp` files are Git-ignored. The existing data
+directory is reused. JSON stores version, level ID, UTC timestamp, run UUID,
+slot, and checkpoint milestone when applicable. Player, inventory, progression,
+and world sections contain only data; no entities, callbacks, shaders or object
+references are serialized. Pickups/doors use the level's existing stable IDs.
+
+Typed validation checks critical fields, finite numeric ranges, unique item
+quantities, collected IDs, retained notes, consumed fuse/battery accounting,
+puzzle dependencies, key-gated pickups, basement/exit doors, and the checkpoint
+milestone/foyer position. Missing optional camera/crouch/exhaustion fields get
+safe defaults; missing critical state, duplicate JSON keys, invalid UTF-8,
+non-finite numbers, files over 64 KiB and incompatible versions are rejected.
+Missing files simply disable Continue. Diagnostics are logged and UI failures
+are shown without crashing or reporting premature success.
+
+Writes validate first, flush/fsync a sibling temporary JSON file, and replace
+with `os.replace`; failed writes preserve the previous slot and clean the temp.
+Invalid existing slots are **preserved and never silently overwritten**. To
+recover such a slot, manually back up/rename the indicated JSON file before
+saving again. Do not edit the only copy of valid progress for testing.
+
+Loading validates before rebuilding, restores into a staged fresh scene,
+checks the saved body position against that scene's actual colliders, then swaps
+sessions. A failure preserves the outgoing player/HUD/camera/fog/lights and
+cleans staged entities, including a constructor that raises before returning.
+Geometry-invalid saves can pass JSON validation and enable Continue, but are
+rejected at staging with feedback. No migration from future/incompatible schema
+versions is attempted.
+
+### Menus, saving, checkpoints, and exact state
+
+Main menu: **New Game, Continue Game, Settings, Controls, Quit Game**.
+Continue uses a valid manual slot first, then a valid checkpoint fallback.
+It is disabled when neither slot validates. New Game requests confirmation if
+any slot exists, including an invalid slot; Cancel preserves both. Confirm
+creates a fresh run and clears only its old checkpoint. Manual progress remains
+available until the next successful manual Save; invalid manual files still
+require the explicit backup/removal described above. Restart/R creates fresh
+in-memory progress without deleting the manual slot. A prior run's checkpoint
+cannot appear as a Retry for the new run because the UUID must match.
+
+Pause has **Save Game**. Saving requires ordinary safe exploration: no active
+CHASE/JUMPSCARE, substantial detection, ghost within 3 units, hiding, modal,
+door animation, terminal screen, or menu transition. A monotonic 10-second
+cooldown prevents repeated writes. Feedback stays on Pause; success appears
+only after atomic replacement succeeds. No quicksave key was added.
+
+Automatic checkpoints follow power restoration, opening the lockbox, and
+collecting the exit key. Unsafe milestones wait until exploration is safe and
+the ghost is at least 12 units from the foyer. The foyer must pass actual body
+clearance and support tests. If several milestones are pending, the newest
+completed one is recorded once; checkpoints never replay or bypass puzzles.
+IO failure produces feedback and avoids per-frame retries/log spam; it retries
+at a later milestone, or the player can use manual Save.
+
+Death offers **Retry from Checkpoint** for a valid checkpoint in the current run,
+plus Restart and Main Menu. Respawn uses the clear authored foyer, facing into
+the house. Battery/stamina/stored batteries are restored **exactly from the
+snapshot**, with no minimum refill. Resources remain finite.
+
+| Restored persistent state | Fresh/reset transient state |
+| --- | --- |
+| Manual position, player yaw, camera pitch/local rotation; crouch and camera height | Hidden/wardrobe occupant state, held keys, mouse velocity, current modal/page |
+| Flashlight possession, on/off and charge; stamina, exhaustion and regeneration delay | Ghost PATROL, valid graph/route, detection/memory/hearing/search/inspection reset |
+| Item quantities, notes readable from level definitions, consumed fuse/batteries | Ghost placed at a clear distant room waypoint (at least 12 units); 5-second capture/perception grace |
+| Three puzzle flags, gated pickups, collected IDs, reward quantities | New seeded paranormal director, tension zero, initial quiet cooldown, no active effects |
+| Open exit door; basement remains locked | Pending HUD callbacks, jumpscare proxies/overlays, noise pulses and animation timers |
+| Objective derived from restored authoritative progress; no health system exists | Preferences remain separate and govern the rebuilt session |
+
+The grace interval, minimum ghost distance and save cooldown are configurable
+in `game/settings.py`. Existing five-state AI, wall sweeps, perception, hiding,
+stamina, flashlight shader/beam/shadows and the puzzle chain remain intact.
+
+### Resource balance and accessibility
+
+| Parameter | Before | Milestone 7 |
+| --- | --- | --- |
+| Maximum flashlight charge | 100 | 100 |
+| Starting charge | 65 | 65 |
+| One kitchen battery | 35 | 35 |
+| Drain, charge/second while ON | 3.5 | 0.25 |
+| Starting continuous illumination | 18.6 seconds | 260 seconds (4m20s) |
+| Total authored supply if not wasted | 28.6 seconds | 400 seconds (6m40s) |
+
+Supply placement/quantity, beam appearance and stamina/difficulty defaults were
+kept. Dark nearby silhouettes remain available at zero charge; required puzzles
+have no battery prerequisite. Turn the light off when safe and keep/use the
+stored battery when charge is low enough to avoid wasting capacity. A known
+route is not a first-time human exploration benchmark; the measured route and
+remaining human balance work are reported below.
+
+Standard player walk/sprint remain 5/8 units per second versus ghost patrol/chase
+2.1/5.9; full sprint drains in about 4.55 seconds (22/s), regenerates at 15/s
+after 1 second, and requires 25 stamina to recover from exhaustion. Detection
+baseline 0.65s, lost-sight interval 2.5s, active search 14s and wardrobe suspicion
+penalties remain unchanged. Relaxed/Standard/Hard multipliers are preserved.
+Existing live AI and loop/occlusion/hiding regressions provide scripted evidence;
+human chase fairness and low-end laptop tuning remain necessary.
+
+Controls/Rebind supports all 11 gameplay actions: four movement directions,
+sprint, crouch, interact, flashlight, inventory, selected item use and pause.
+Select an action, press Enter/click, then press a new key. Conflicts are rejected
+without changing preferences; Escape cancels capture, and Reset to Defaults
+restores the original keys. Changes persist atomically with preferences and
+update the control list, HUD prompts and inventory shortcuts. Supported keys
+are A-Z except R, plus Space, Shift, Control and Tab; Escape can bind only Pause
+and always remains an emergency menu close/pause key. R, arrows, Enter,
+Backspace, digits and page keys are reserved so terminal restart, menu navigation
+and combination entry remain reliable. Mouse look is unchanged.
+
+UI text sizes are **100%, 125%, 150%**, saved with preferences and applied live
+to menus, HUD, objectives, inventory, notes, combination, and terminal screens.
+Settings/Controls paginate with PgUp/PgDn (Up/Down still reaches every action).
+Long notes paginate without losing their contents. At larger sizes resource HUD
+uses extra lines during exploration and a compact two-line survival readout
+above active modals, preventing overlap with their titles. Layout fitting and
+message positioning handle 640x480, 960x720 and 1280x720. Reduced Flicker applies
+to horror and low-battery light: below 15% it gives a steady 75% beam rather than
+rapid intermittent darkness; ordinary timed flicker remains available when Off.
+Drain/depletion and shadow geometry are unchanged by this preference.
+
+### Validation and evidence
+
+**Final full suite: 175 tests passed in 202.228 seconds**, including all 135
+original tests and 40 new cases (17 JSON/IO, 19 real-engine persistence/control/
+accessibility, 4 preference regressions). Compilation and `git diff --check`
+passed. Test-name comparison against `HEAD` found no removed original cases.
+Existing menu row assertions and battery depletion values were updated for the
+new rows/drain; the original timed-flicker branch is still explicitly tested.
+
+Native scripted validation passed two complete puzzle/save/Continue/live-catch/
+checkpoint-Retry/key-save/Continue/escape routes, six terminal R restarts, and
+the New Game confirmation/reset. Both routes together used **55.60 seconds of
+walking simulation** (about 27.8 seconds per known route), excluding human clue
+reading, searching, detours, interfaces and evasion. The old 28.6-second total
+supply barely covered known-route walking; 400 seconds now leaves roughly six
+additional illuminated minutes for those activities. This is a provisional
+resource budget, not a measured first-time human completion time.
+
+All nine stationary OFF/ON pairs passed pixel checks; hall means were 7.26/13.74,
+ghost 9.88/23.31 and key 10.09/34.80 (0-255 RGB channel means in a cropped world
+region). Room/prop colors and beam/shadow rendering remained intact. Screenshots
+were visually reviewed. Review found HUD/title overlap at 150%; compacting the
+modal resource readout fixed it, and a subsequent native accessibility run
+recaptured all three sizes at all three scales. Native focus requests were
+refused by Windows; direct focus events passed, so physical Alt+Tab remains
+untested. Existing non-fatal engine warnings include the missing packaged
+`textures/ursina.ico`, monitor/framebuffer notices, and PNG profile metadata;
+no shader errors or unexpected gameplay exceptions occurred in the successful
+native run.
+
+On NVIDIA RTX 3050 Laptop GPU, the native initial live fixture measured median
+**12.25 ms**, p95 **29.20 ms** per task step. Stationary hallway lighting ON
+measured median 8.17 ms / p95 10.57 ms; OFF 9.51 / 16.62 ms. Scheduling/driver
+noise means the OFF/ON numbers should not be interpreted as a lighting speedup.
+Frozen-ghost horror fixtures with explicit extra rendering measured median
+22.31 ms active / 21.87 ms quiet. These are scoped scripted observations, not
+performance guarantees for ordinary student laptops.
+
+| Profile snapshot | After 5 warm loads | After 25 loads | After 600 simulated seconds |
+| --- | ---: | ---: | ---: |
+| Live entities / colliders | 456 / 145 | 456 / 145 | 456 / 145 |
+| Ghost / manager / lights / engine tasks | 1 / 1 / 3 / 9 | 1 / 1 / 3 / 9 | 1 / 1 / 3 / 9 |
+| Active sequences | 1 | 1 | 0 (message expired) |
+| Python traced bytes after GC | 847,252 | 893,195 | 966,710 |
+| Process private bytes | 258,072,576 | 275,525,632 | 268,193,792 |
+| Process working-set bytes | 246,734,848 | 271,024,128 | 271,425,536 |
+
+The 600-second simulation measured median 186.66 ms, p95 235.12 ms and maximum
+344.22 ms per profiling frame; Python traced peak 1,734,975 bytes. Each frame
+advances 0.5 seconds through the unchanged 1/240 player substeps, with tracemalloc
+and explicit extra rendering enabled. It is a stress workload rather than
+ordinary gameplay FPS. Counts stayed stable, but heap/process deltas remain
+reported; this does not establish that every multi-hour leak is absent.
+
+The native harness calls actual `main.py` and uses temporary slots
+and memory-only preferences, preserving local user data. Routes use real W
+movement, collision rays, E interactions, and keyboard puzzle/menu dispatch.
+The ghost is frozen for deterministic route and UI/render/profiling fixtures;
+a live CHASE/inspection/capture runs for the actual death/retry checks. This is
+**scripted native testing, not human interactive gameplay**.
+
+Commands from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q main.py game
+.\.venv\Scripts\python.exe -m unittest discover -s game/tests -v
+.\.venv\Scripts\python.exe -u -m game.tests.windowed_smoke
+.\.venv\Scripts\python.exe -u -m game.tests.windowed_smoke --accessibility-only
+git diff --check
+```
+
+Generated `game/tests/render_*.png` files are local verification artifacts,
+not game assets. `render_persistence_profile.json` contains entity/collider/
+light/task/sequence counts, Python traced heap, Windows process private/working
+memory, and frame distributions. Profiling compares after five warm loads and
+after 25 loads plus 25 pause cycles, then advances 600 simulated seconds with
+the real player/director in a native window. Tracemalloc and 0.5-second timestep
+substeps add overhead; those costs are not ordinary gameplay FPS. Memory deltas
+can include caches/driver allocations; stable object counts do not prove the
+absence of every leak.
+
+Representative screenshot links (generated by the commands above):
+
+- [Continue](game/tests/render_persistence_continue_power.png), [Save feedback](game/tests/render_persistence_save_power.png).
+- [Checkpoint Retry](game/tests/render_persistence_checkpoint_retry.png), [Recovered foyer](game/tests/render_persistence_checkpoint_restored.png).
+- [Restored powered box](game/tests/render_persistence_restored_power.png), [Restored key progress](game/tests/render_persistence_restored_key.png).
+- [Rebinding](game/tests/render_persistence_rebind.png), [Conflict feedback](game/tests/render_persistence_rebind_conflict.png).
+- [150% settings at 640x480](game/tests/render_access_settings_1.5_640x480_p2.png), [150% note](game/tests/render_access_note_1.5_640x480.png), [150% inventory](game/tests/render_access_inventory_1.5_640x480.png), [150% combination](game/tests/render_access_combination_1.5_640x480.png).
+- [Hall OFF](game/tests/render_lighting_main_hall_off.png), [Hall ON](game/tests/render_lighting_main_hall_on.png).
+
+### Manual Milestone 7 acceptance route
+
+```powershell
+Set-Location 'C:\Users\User\Desktop\Sinister_Secrets'
+.\.venv\Scripts\python.exe main.py
+```
+
+1. Select New Game. If saves exist, Cancel first to confirm preservation, then
+   New Game/Confirm. The checkpoint resets; manual progress remains until Save.
+2. E on the white foyer flashlight, F to toggle; walk/look/sprint/crouch and
+   collide with walls. Test both house loops and a wardrobe during a chase.
+3. Read the living-room note, close Escape; collect the fuse in storage and
+   use E on the kitchen electrical box. Expect the power checkpoint when safe.
+4. Pause with Escape, select Save Game, confirm success; attempt an immediate
+   second save and check the cooldown. CHASE/hiding/modals must reject saving.
+5. Select Return to Main Menu, Continue. Verify location/view, flashlight
+   charge/on state, note/inventory, installed fuse, gated drawer and objective.
+6. Collect/use the kitchen battery through Tab, select battery, U then Enter.
+   At full charge it stays stored. Read the newly available kitchen tally note.
+7. Use the dining lockbox: try an incorrect code, then the clue solution
+   **2417**. Confirm exactly one crowbar and a lockbox checkpoint when safe.
+8. Let the live ghost catch you. Watch the staged catch, choose Retry from
+   Checkpoint. Verify foyer clearance, safe ghost patrol/grace, puzzle progress,
+   readable notes and exact checkpoint resources; no extra crowbar should appear.
+9. Reach Bedroom Two, use E on the boards, then collect its exit key. Expect
+   the key checkpoint and the north-exit objective.
+10. Wait 10 seconds after the prior manual save if needed; Pause/Save, return
+    to menu, Continue. Verify the boards stay removed and only one key exists.
+11. Reach the north exit, E to unlock; push against it while opening, then walk
+    through once the 0.8-second animation completes. Confirm victory.
+12. Escape to Main Menu, New Game/Confirm; verify empty inventory, initial
+    flashlight pickup, all puzzles locked, no valid Retry for the previous run.
+    Repeat R after death/victory and several saves/loads; watch for exceptions.
+13. Settings: choose 150% text on its second page and Apply. Resize to all three
+    sizes; open notes (PgDn for subsequent pages), inventory, combination,
+    Controls and Pause. Check titles, footers, objective and messages for overlap.
+14. Rebind movement/interact/light/inventory/use/pause, test a conflict and
+    cancel, then restore defaults. Restart the application to check persistence.
+    Alt+Tab while moving, release keys outside, return; check pause/capture and
+    no stuck movement. Test low battery with Reduced Flicker On and Off.
+15. For corrupt/version tests, use the isolated automated suite or a separate
+    copy of the project with separate save files. Confirm disabled Continue or
+    valid checkpoint fallback, clear failure feedback and preservation of bytes.
+
+Remaining acceptance work: human first-time resource/chase fairness, physical
+mouse/Alt+Tab and rebinding comfort, multi-hour sessions, power-loss/storage
+faults beyond simulated failed writes, other GPUs/drivers and student laptops.
+Only schema 1 and one authored level are supported. Cloud saves and multiple profiles are outside this milestone.
+
+### Files and Milestone 8 recommendations
+
+Modified existing files: `.gitignore`, `README.md`, `game/game_manager.py`,
+`game/settings.py`, `game/ghost/ghost_ai.py`, `game/player/player.py`,
+`game/systems/save_manager.py`, `game/systems/progression.py`,
+`game/ui/main_menu.py`, `game/ui/pause_menu.py`, `game/ui/game_over.py`,
+`game/ui/hud.py`, `game/ui/inventory_ui.py`, `game/tests/test_prototype.py`,
+`game/tests/test_settings.py`, `game/tests/windowed_smoke.py`.
+Created source file: `game/tests/test_save.py`. Existing folder structure,
+level data and assets remain unchanged. Screenshots/profile JSON are ignored
+local evidence files.
+
+For Milestone 8, prioritize human balance/low-end performance measurements,
+clearer clue/objective onboarding without changing puzzle dependencies, and
+fault-tolerant save evolution (migration/backups with explicit retention rules).
+Then design an authored next progression chapter and test its navigation/save
+IDs before discussing new horror assets/audio. Avoid expanding systems before
+first-time playtests establish that the current chase/resource loop is fair.
 
 ## Milestone 6: menus, pause, preferences, and lifecycle
 

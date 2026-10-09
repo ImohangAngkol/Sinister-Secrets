@@ -1,4 +1,4 @@
-"""Small per-playthrough puzzle state; no save system or global mutable state."""
+"""Per-playthrough puzzle state and deterministic restoration without rewards."""
 class Progression:
     def __init__(self, house, player):
         self.house, self.player = house, player
@@ -24,6 +24,24 @@ class Progression:
 
     def refresh(self):
         self.player.hud.set_objective(self.objective)
+
+    def restore(self, flags, collected):
+        from ursina import destroy
+        for name, value in flags.items():
+            setattr(self, name, value)
+        for name in collected:
+            destroy(self.house.pickups[name])
+        for name, entity in self.house.pickups.items():
+            if not entity.is_empty():
+                definition = next(p for p in self.house.level.spawns['pickups'] if p['id']==name)
+                entity.enabled = not definition.get('requires') or getattr(self, definition['requires'])
+        for name, completed in (('fuse_box',self.power_restored),('lockbox',self.safe_unlocked)):
+            if completed:
+                prop = self.house.puzzles[name]
+                prop.color = prop.powered_color
+                prop.interaction_text = '[E] Electrical box (powered)' if name=='fuse_box' else '[E] Lockbox (opened)'
+        self.house.puzzles['boards'].enabled = not self.boards_removed
+        self.refresh()
 
     def install_fuse(self):
         if self.power_restored:

@@ -5,5 +5,6 @@ class PauseMenu(MenuScreen):
     def __init__(self, manager):
         super().__init__("PAUSED", [
             ("Resume", manager.resume_game), ("Settings", manager.open_settings),
+            ("Save Game", manager.save_game),
             ("Restart Game", manager.restart_game), ("Return to Main Menu", manager.return_to_menu),
-            ("Quit Game", manager.quit_game)], "The house waits. Escape resumes.", row_y=.14, row_step=.085)
+            ("Quit Game", manager.quit_game)], "The house waits. Escape resumes.", row_y=.14, row_step=.08)

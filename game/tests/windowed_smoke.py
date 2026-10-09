@@ -7,6 +7,12 @@ from pathlib import Path
 import math
 import runpy
 import statistics
+import tempfile
+import json
+import gc
+import tracemalloc
+import ctypes
+import sys
 import time as wall_clock
 
 from direct.showbase.ShowBase import ShowBase
@@ -24,7 +30,12 @@ def verify_window(app):
     manager = next(entity for entity in scene.entities if isinstance(entity, GameManager))
     # Deterministic defaults without overwriting the player's local preferences.
     manager.preferences = Preferences(path=None)
-    manager._apply_fps_cap()
+    from game.systems.save_manager import SaveManager
+    save_folder = tempfile.TemporaryDirectory()
+    manager.save_manager = SaveManager(save_folder.name)
+    manager.automatic_checkpoints = False
+    manager.main_menu.refresh_saves()
+    manager.apply_live_preferences()
 
     def frames(count=12):
         for _ in range(count):
@@ -54,6 +65,38 @@ def verify_window(app):
         direction = Vec3(*target) - camera.position
         camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
                                math.degrees(math.atan2(direction.x, direction.z)), 0)
+
+    def capture_gameplay_accessibility():
+        player,house=manager.scene_manager.player,manager.scene_manager.house
+        manager.scene_manager.ghost.enabled=False  # Stationary UI fixture only.
+        player.inventory.add('household_order')  # UI-only fixture after reset.
+        for factor in (1.,1.25,1.5):
+            manager.preferences.save(dict(manager.preferences.values,text_scale=factor))
+            manager.apply_live_preferences()
+            for width,height in ((640,480),(960,720),(1280,720)):
+                resize(width,height)
+                for mode in ('inventory','note','combination'):
+                    if mode=='inventory': manager.hud.panel.open_inventory(player)
+                    elif mode=='note': manager.hud.panel.open_note(player,'household_order')
+                    else: manager.hud.panel.open_combination(player,house.puzzles['lockbox'])
+                    frames(2)
+                    capture(f'render_access_{mode}_{factor}_{width}x{height}.png')
+                    manager.hud.panel.close()
+                manager.hud.show_message('Checkpoint restored. Escape pauses; Tab opens inventory.')
+                frames(2)
+                capture(f'render_access_hud_{factor}_{width}x{height}.png')
+                app.input('escape',is_raw=True)
+                frames(2)
+                capture(f'render_access_pause_{factor}_{width}x{height}.png')
+                app.input('escape',is_raw=True)
+                manager.end_screen.show('CAUGHT!','Retry restores your checkpoint. R: restart; Escape: menu')
+                manager.end_screen.enabled=True
+                frames(2)
+                capture(f'render_access_end_{factor}_{width}x{height}.png')
+                manager.end_screen.enabled=False
+        manager.preferences=Preferences(path=None)
+        manager.apply_live_preferences()
+        resize(1280,720)
 
     try:
         frames(60)
@@ -97,7 +140,7 @@ def verify_window(app):
             manager.pause_menu.selected=1
             app.input('enter',is_raw=True)
             app.input('right arrow',is_raw=True)
-            manager.settings_menu.selected=9  # Apply and Back.
+            manager.settings_menu.selected=11  # Apply and Back.
             app.input('enter',is_raw=True)
             assert manager.state=='paused' and tuple(current.player.mouse_sensitivity)==(50,50)
             app.input('escape',is_raw=True)
@@ -114,6 +157,43 @@ def verify_window(app):
             assert manager.state=='menu' and manager.scene_manager is None and current.house.is_empty()
             # Restore defaults in memory for the existing lighting/survival fixtures.
             manager.preferences=Preferences(path=None)
+        # All accessibility views use the same real native-window panels.
+        for factor in (1.,1.25,1.5):
+            manager.preferences.save(dict(manager.preferences.values,text_scale=factor))
+            manager.apply_live_preferences()
+            for width,height in ((640,480),(960,720),(1280,720)):
+                resize(width,height)
+                frames(2)
+                capture(f'render_access_main_{factor}_{width}x{height}.png')
+                manager.open_settings()
+                for page in (0,9):
+                    manager.settings_menu.selected=page
+                    manager.settings_menu.refresh_selection()
+                    frames(2)
+                    capture(f'render_access_settings_{factor}_{width}x{height}_p{page//9+1}.png')
+                manager.open_controls()
+                frames(2)
+                capture(f'render_access_controls_{factor}_{width}x{height}.png')
+                manager.close_submenu()
+                manager.close_submenu()
+        manager.open_controls()
+        app.input('enter',is_raw=True)
+        app.input('s',is_raw=True)
+        assert manager.controls_screen.waiting=='forward'
+        capture('render_persistence_rebind_conflict.png')
+        app.input('escape',is_raw=True)
+        app.input('enter',is_raw=True)
+        app.input('i',is_raw=True)
+        assert manager.preferences.values['bindings']['forward']=='i'
+        frames(2)
+        capture('render_persistence_rebind.png')
+        manager.controls_screen.reset_defaults()
+        app.input('escape',is_raw=True)
+        manager.preferences=Preferences(path=None)
+        manager.apply_live_preferences()
+        resize(1280,720)
+        manager.main_menu.selected=0
+        manager.main_menu.refresh_selection()
         # Exercise the native mouse ray rather than just assigning hovered_entity.
         app.win.move_pointer(0,640,round(720*(.5-.12)))
         frames(4)
@@ -123,6 +203,10 @@ def verify_window(app):
         frames(2)
         assert manager.state=='playing' and manager.scene_manager is not None
         print('MENU_WINDOW_OK: three sizes; menu/settings/controls/pause/inventory/end; native mouse ray Start; resource freeze; resume; fresh-session cleanup')
+        if '--accessibility-only' in sys.argv:
+            capture_gameplay_accessibility()
+            print('ACCESSIBILITY_WINDOW_OK: real native 3 sizes x 3 scales, menus/HUD/inventory/notes/combination/pause/end; scripted fixture')
+            return
         assert manager.state == "playing"
         assert mouse.locked
         capture("render_windowed.png")
@@ -364,7 +448,49 @@ def verify_window(app):
         from game.player.interaction import get_interaction_hit
         current_room = 'foyer'
 
+        route_seconds = 0.0
+
+        def restore_refs():
+            nonlocal player,house,ghost
+            player,house,ghost=(manager.scene_manager.player,manager.scene_manager.house,manager.scene_manager.ghost)
+            ghost.enabled=False
+            ghost.position=Vec3(house.ghost_spawn)  # Frozen route fixture, away from foyer.
+            simulated_frames(2)
+
+        def manual_save_continue(label):
+            nonlocal current_room
+            player.toggle_flashlight()
+            simulated_frames(2)
+            app.input('escape',is_raw=True)
+            manager.pause_menu.selected=2
+            manager.pause_menu.refresh_selection()
+            while wall_clock.monotonic()-manager._last_manual_save<10:
+                frames(1)
+                wall_clock.sleep(.05)
+            app.input('enter',is_raw=True)
+            assert 'Game saved' in manager.pause_menu.subtitle_text.text
+            snapshot=manager.save_manager.load()
+            frames(2)
+            capture(f'render_persistence_save_{label}.png')
+            manager.pause_menu.selected=4
+            app.input('enter',is_raw=True)
+            assert manager.state=='menu' and 1 not in manager.main_menu.disabled_rows
+            manager.main_menu.selected=1
+            manager.main_menu.refresh_selection()
+            frames(2)
+            capture(f'render_persistence_continue_{label}.png')
+            app.input('enter',is_raw=True)
+            assert manager.state=='playing'
+            assert list(manager.scene_manager.player.position)==snapshot['player']['position']
+            assert manager.scene_manager.player.inventory.quantities==snapshot['inventory']
+            assert manager.scene_manager.player.stats.battery==snapshot['player']['battery']
+            assert manager.scene_manager.player.flashlight_on
+            restore_refs()
+            capture(f'render_persistence_restored_{label}.png')
+            app.input('f',is_raw=True)
+
         def walk_to(point):
+            nonlocal route_seconds
             point = Vec3(*point)
             camera.rotation = Vec3(0,0,0)
             player.camera_pivot.rotation_x = 0
@@ -378,6 +504,7 @@ def verify_window(app):
                     player.rotation_y = math.degrees(math.atan2(delta.x,delta.z))
                     before = Vec3(player.position)
                     time.dt = time.dt_unscaled = min(1/30,delta.length()/5)
+                    route_seconds += time.dt
                     frames(1)
                     assert (player.position-before).length() > .000001, (
                         point,before,'W',held_keys['w'],'dt',time.dt,'focused',manager._focused,
@@ -402,6 +529,8 @@ def verify_window(app):
             if playthrough:
                 app.input('escape',is_raw=True)
                 assert manager.state=='menu' and manager.scene_manager is None
+                app.input('enter',is_raw=True)
+                assert manager.state=='confirm_new'
                 app.input('enter',is_raw=True)
                 simulated_frames(2)
                 player,house,ghost=(manager.scene_manager.player,manager.scene_manager.house,
@@ -430,6 +559,10 @@ def verify_window(app):
             app.input('tab',is_raw=True)
             visit(props['fuse_box'],house.puzzles['fuse_box'])
             assert player.progression.power_restored and player.inventory.count('fuse') == 0
+            manager.automatic_checkpoints=True
+            manager._checkpoints()
+            assert manager.save_manager.load('checkpoint')['milestone']=='power'
+            manual_save_continue('power')
             app.input('escape',is_raw=True)
             assert manager.state=='paused'
             charge,clock=player.stats.battery,manager.scene_manager.horror.clock
@@ -467,10 +600,43 @@ def verify_window(app):
             for digit in house.level.house['progression']['combination']: app.input(digit,is_raw=True)
             app.input('enter',is_raw=True)
             assert player.progression.safe_unlocked and player.inventory.count('crowbar') == 1
+            simulated_frames(2)
+            checkpoint=manager.save_manager.load('checkpoint')
+            assert checkpoint['milestone']=='lockbox'
+            # Live capture from a close, unobstructed CHASE fixture; actual AI
+            # and staged jumpscare run to completion, rather than calling death.
+            ghost.enabled=True
+            ghost.ai.grace_time=0
+            from game.ghost.ghost_states import GhostState
+            ghost.ai.state=GhostState.CHASE
+            ghost.ai.detection=1
+            ghost.position=player.position+Vec3(0,0,-.8)
+            ghost.look_at_2d(player.position,'y')
+            for _ in range(200):
+                simulated_frames(1)
+                if manager.state=='dead': break
+            assert manager.state=='dead'
+            manager.end_screen.selected=2
+            manager.end_screen.refresh_selection()
+            frames(2)
+            capture('render_persistence_checkpoint_retry.png')
+            app.input('enter',is_raw=True)
+            assert manager.state=='playing'
+            assert manager.scene_manager.player.inventory.quantities==checkpoint['inventory']
+            assert manager.scene_manager.player.stats.battery==checkpoint['player']['battery']
+            assert manager.scene_manager.player.position==Vec3(house.nav_nodes['foyer'])
+            assert manager.scene_manager.ghost.ai.grace_time==5
+            assert manager.scene_manager.ghost.ai.detection==0
+            restore_refs()
+            current_room='foyer'
+            capture('render_persistence_checkpoint_restored.png')
             visit(props['boards'],house.puzzles['boards'])
             assert player.progression.boards_removed and player.inventory.count('crowbar') == 1
             visit(spawns['bedroom_exit_key'],house.pickups['bedroom_exit_key'])
             assert player.inventory.has_key('exit_key')
+            simulated_frames(2)
+            assert manager.save_manager.load('checkpoint')['milestone']=='exit_key'
+            manual_save_continue('key')
             app.input('f',is_raw=True)
             simulated_frames(2)
             manager.hud.message.enabled = False
@@ -497,7 +663,10 @@ def verify_window(app):
         player, house, ghost = (manager.scene_manager.player, manager.scene_manager.house,
                                 manager.scene_manager.ghost)
         assert not player.progression.power_restored and not player.inventory.quantities
+        manager.automatic_checkpoints=False
+        print(f'PERSISTENCE_ROUTE: two full routes, {route_seconds:.2f}s walking simulation; excludes human clue reading/search/detours')
         print('PROGRESSION_WINDOW_OK: two full puzzle escapes via victory/menu/new game, pause after fuse, W/rays/E, notes, inventory/resize, fuse, wrong/correct code, reusable crowbar, key, exit, R reset; ghost disabled for route fixture')
+        capture_gameplay_accessibility()
         application.calculate_dt = calculate_dt
         mouse.enabled = mouse_enabled
         held_keys.clear()
@@ -572,8 +741,63 @@ def verify_window(app):
         print(f"HOUSE_VIEWS_OK: {len(house.rooms)} areas, {len(house.nav_nodes)} nodes, "
               f"{len(house.level.navigation['edges'])} edges, "
               f"{len(scene.collidables)} colliders, six authored screenshots and nine OFF/ON pairs")
+        manager.return_to_menu()
+        assert manager.continue_game()
+        restore_refs()
+        mouse.enabled=False
+        application.calculate_dt=False
+        manager.automatic_checkpoints=False
+        tracemalloc.start()
+
+        def private_memory():
+            from ctypes import wintypes
+            class MemoryCounters(ctypes.Structure):
+                _fields_=[('cb',wintypes.DWORD),('PageFaultCount',wintypes.DWORD)]+[(name,ctypes.c_size_t) for name in ('PeakWorkingSetSize','WorkingSetSize','QuotaPeakPagedPoolUsage','QuotaPagedPoolUsage','QuotaPeakNonPagedPoolUsage','QuotaNonPagedPoolUsage','PagefileUsage','PeakPagefileUsage','PrivateUsage')]
+            counters=MemoryCounters();counters.cb=ctypes.sizeof(counters)
+            process=ctypes.windll.kernel32.GetCurrentProcess
+            process.restype=wintypes.HANDLE
+            query=ctypes.windll.psapi.GetProcessMemoryInfo
+            query.argtypes=(wintypes.HANDLE,ctypes.POINTER(MemoryCounters),wintypes.DWORD)
+            assert query(process(),ctypes.byref(counters),counters.cb)
+            return counters.PrivateUsage,counters.WorkingSetSize
+
+        def sample():
+            gc.collect()
+            active=[e for e in scene.entities if not e.is_empty()]
+            from panda3d.core import LightAttrib
+            return dict(entities=len(active),colliders=len(scene.collidables),ghosts=sum(e.__class__.__name__=='Ghost' for e in active),managers=sum(isinstance(e,GameManager) for e in active),lights=app.render.get_state().get_attrib(LightAttrib).get_num_on_lights(),tasks=len(app.taskMgr.getAllTasks()),sequences=len(application.sequences),python_bytes=tracemalloc.get_traced_memory()[0],private_working_bytes=private_memory())
+
+        samples=[]
+        for cycle in range(25):
+            app.input('escape',is_raw=True)
+            # Backend writes exercise IO/restore repeatedly; UI cooldown is
+            # tested above and is deliberately not bypassed through the UI.
+            manager.save_manager.save(SaveManager.capture(manager.scene_manager,manager.session_id))
+            assert manager.load_game()
+            restore_refs()
+            samples.append(sample())
+        stable_keys=('entities','colliders','ghosts','managers','lights','tasks','sequences')
+        assert all(samples[-1][key]==samples[4][key] for key in stable_keys),(samples[4],samples[-1])
+        for _ in range(25):
+            app.input('escape',is_raw=True)
+            app.input('escape',is_raw=True)
+            simulated_frames(2)
+        costs=[]
+        for _ in range(1200):
+            time.dt=time.dt_unscaled=.5
+            before=wall_clock.perf_counter()
+            frames(1)
+            costs.append((wall_clock.perf_counter()-before)*1000)
+        end=sample()
+        report=dict(warmup=samples[4],after_25_loads=samples[-1],after_600_simulated_seconds=end,
+                    frame_median_ms=statistics.median(costs),frame_p95_ms=sorted(costs)[1139],frame_max_ms=max(costs),python_peak_bytes=tracemalloc.get_traced_memory()[1],gpu=app.win.get_gsg().get_driver_renderer(),limitations='Scripted native window; ghost frozen for route/profiling. Tracemalloc adds overhead. Simulated time is not 10 minutes of human play. Process deltas include caches/driver allocations.')
+        Path(__file__).with_name('render_persistence_profile.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+        print('PERSISTENCE_PROFILE',json.dumps(report))
+        print('PERSISTENCE_WINDOW_OK: temporary slots only; fuse/manual/Continue; lockbox/live CHASE/catch/Retry; key/manual/Continue/escape twice; confirmation/reset; 25 loads and pause cycles; 600 simulated seconds; all scale/size screenshots')
+        tracemalloc.stop()
     finally:
         app.destroy()
+        save_folder.cleanup()
 
 
 if __name__ == "__main__":

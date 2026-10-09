@@ -29,6 +29,7 @@ from game.player.interaction import (
     update_interaction_prompt,
 )
 from game.player.player_stats import PlayerStats
+from game.settings import BINDING_DEFAULTS
 from game.settings import (
     FLASHLIGHT_DRAIN_PER_SECOND,
     FLASHLIGHT_ATTENUATION,
@@ -69,6 +70,8 @@ class HorrorPlayer(FirstPersonController):
         self.hud = hud
         self.inventory = Inventory()
         self.progression = None
+        self.bindings = BINDING_DEFAULTS.copy()
+        self.reduced_flicker = False  # Scene preferences opt in; legacy branch remains available.
         self.stats = PlayerStats()
         self.crouching = False
         self.sprinting = False
@@ -110,6 +113,28 @@ class HorrorPlayer(FirstPersonController):
         self.hud.refresh_inventory(self)
 
     def update(self):
+        # Translate only the controller's movement keys while it runs. Restore
+        # raw held keys afterward so menu/modal input remains independent.
+        if self.bindings == BINDING_DEFAULTS:
+            return self._update_player()
+        aliases = {'shift': ('shift','left shift','right shift'),
+                   'control': ('control','left control','right control')}
+        translated = {}
+        for action, canonical in (("forward","w"),("backward","s"),("left","a"),("right","d"),
+                                  ("sprint","shift"),("crouch","control")):
+            binding = self.bindings[action]
+            translated[canonical] = any(held_keys[k] for k in aliases.get(binding,(binding,)))
+        keys = ('w','s','a','d','shift','left shift','right shift','control','left control','right control')
+        before = {key:held_keys[key] for key in keys}
+        try:
+            for key in keys:
+                held_keys[key] = translated.get(key, 0)
+            return self._update_player()
+        finally:
+            for key, value in before.items():
+                held_keys[key] = value
+
+    def _update_player(self):
         # Ursina's controller uses short rays. Substeps prevent sprinting through
         # thin walls during a slow frame; apply mouse movement only once.
         frame_dt = time.dt
@@ -215,14 +240,14 @@ class HorrorPlayer(FirstPersonController):
     def can_occupy(self, position, height=PLAYER_HEIGHT):
         for x, z in ((0, 0), (-0.34, -0.34), (-0.34, 0.34), (0.34, -0.34), (0.34, 0.34)):
             hit = world_raycast(position + Vec3(x, 0.05, z), Vec3(0, 1, 0),
-                                distance=height, ignore=[self])
+                                distance=height, ignore=[self], traverse_target=self.traverse_target)
             if hit.hit:
                 return False
         for y in (0.5, height - 0.1):
             for direction in (Vec3(1, 0, 0), Vec3(-1, 0, 0), Vec3(0, 0, 1), Vec3(0, 0, -1)):
-                if world_raycast(position + Vec3(0, y, 0), direction, distance=0.35, ignore=[self]).hit:
+                if world_raycast(position + Vec3(0, y, 0), direction, distance=0.35, ignore=[self], traverse_target=self.traverse_target).hit:
                     return False
-        floor = world_raycast(position + Vec3(0, 0.5, 0), Vec3(0, -1, 0), distance=0.6, ignore=[self])
+        floor = world_raycast(position + Vec3(0, 0.5, 0), Vec3(0, -1, 0), distance=0.6, ignore=[self], traverse_target=self.traverse_target)
         # Panda transforms normals with Entity scale; floor tiles have Y scale .3.
         return floor.hit and floor.world_normal.normalized().y > 0.7
 
@@ -292,11 +317,11 @@ class HorrorPlayer(FirstPersonController):
     def input(self, key):
         if self.hud.panel.active:
             return
-        if key == "f":
+        if key == self.bindings['flashlight']:
             self.toggle_flashlight()
             return
 
-        if key == "e":
+        if key == self.bindings['interact']:
             interact(self)
             return
 
@@ -397,7 +422,11 @@ class HorrorPlayer(FirstPersonController):
                     self._flicker_remaining += (random.uniform(0.06, 0.12)
                                                if self._flicker_dark
                                                else random.uniform(0.35, 0.9))
-                self._set_flashlight_light(not self._flicker_dark)
+                # Reduced flicker gives a steady, dim low-battery beam without
+                # changing drain, elapsed-time warning state, or shadow geometry.
+                self._set_flashlight_light(True if self.reduced_flicker else not self._flicker_dark)
+                if self.reduced_flicker:
+                    self.flashlight_light.color = color.rgb(*(channel*.75 for channel in FLASHLIGHT_COLOR))
             else:
                 self._flicker_active = False
                 self._set_flashlight_light(True)

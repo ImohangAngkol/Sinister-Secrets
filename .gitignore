@@ -6,7 +6,12 @@ __pycache__/
 
 # Generated rendering verification, not game assets.
 game/tests/render_*.png
+game/tests/render_*_profile.json
 
 # Local preferences, not a save/checkpoint or shared balance configuration.
 game/data/user_preferences.json
 game/data/user_preferences.json.tmp
+game/data/manual_save.json
+game/data/manual_save.json.tmp
+game/data/checkpoint_save.json
+game/data/checkpoint_save.json.tmp

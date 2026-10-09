@@ -49,11 +49,16 @@ class InventoryUI(Text):
             f"{flashlight_text}\n"
             f"Keys: "
             f"{player.inventory.key_count()}"
-            f" | Batteries: {player.inventory.count('battery')} | Tab: inventory"
+            f" | Batteries: {player.inventory.count('battery')}"
+            f"{'\n' if player.hud.text_scale > 1 else ' | '}{player.bindings['inventory'].upper()}: inventory"
             f"\nStamina: {int(player.stats.stamina)}%"
             f"{' (exhausted)' if player.stats.sprint_exhausted else ''}"
-            f"{'\nHidden: E to leave' if player.hidden else '\nCrouching' if player.crouching else ''}"
+            f"{f'\nHidden: {player.bindings["interact"].upper()} to leave' if player.hidden else '\nCrouching' if player.crouching else ''}"
         )
+        if player.hud.panel.active:
+            # Keep survival resources visible above the modal without the
+            # redundant inventory shortcut/item counts covering its title.
+            text = f"{flashlight_text}\nStamina: {int(player.stats.stamina)}%{' (hidden)' if player.hidden else ''}"
         if self.text != text:
             self.text = text
             self.create_background(padding=0.025, color=color.black66)
@@ -69,6 +74,7 @@ class GameplayPanel(Entity):
         self.confirming = False
         self.digits = ""
         self.status = ""
+        self.note_page = 0
         Entity(parent=self, model="quad", scale=(1.18, .82), color=color.rgba32(9, 12, 17, 246), z=.01)
         self.title = Text(parent=self, origin=(-.5,.5), x=-.53, y=.34, scale=1.2, color=TEXT_COLOR)
         self.body = Text(parent=self, origin=(-.5,.5), x=-.53, y=.23, scale=.95, color=TEXT_COLOR)
@@ -81,6 +87,10 @@ class GameplayPanel(Entity):
 
     def layout(self, aspect):
         self.scale = min(1, (aspect - .06) / 1.18)
+        factor = self.parent.text_scale
+        for element, base in ((self.title,1.2),(self.body,.95),(self.detail,.88),(self.footer,.82)):
+            element.scale = base*factor
+        self.footer.y = -.28 if factor>1 else -.32
 
     def _open(self, player, mode):
         if hasattr(player,'horror'):
@@ -89,12 +99,14 @@ class GameplayPanel(Entity):
         self.enabled = True
         self.confirming = False
         self.status = ""
+        self.note_page = 0
         held_keys.clear()
         mouse.velocity = Vec3(0, 0, 0)
         player.cursor.enabled = False
         player.hud.set_prompt("")
         player.hud.objective.enabled = False
         player.hud.message.enabled = False
+        player.hud.refresh_inventory(player)
         self.layout(camera.aspect_ratio)
         player.hud.layout(camera.aspect_ratio)
 
@@ -127,15 +139,15 @@ class GameplayPanel(Entity):
         if self.player:
             self.player.hud.objective.enabled = True
             self.player.hud.message.enabled = bool(self.player.hud.message.text)
+            self.player.hud.refresh_inventory(self.player)
             self.player.hud.layout(camera.aspect_ratio)
         self.player = None
 
     def item_ids(self):
         return list(self.player.inventory.quantities)
 
-    @staticmethod
-    def wrap(text):
-        return "\n".join(textwrap.fill(line, width=55) for line in text.split("\n"))
+    def wrap(self, text):
+        return "\n".join(textwrap.fill(line, width=int(55/self.parent.text_scale)) for line in self.parent.control_text(text).split("\n"))
 
     def refresh(self):
         inventory = self.player.inventory
@@ -154,19 +166,28 @@ class GameplayPanel(Entity):
         elif self.mode == "note":
             definition = inventory.definitions[self.note_id]
             self.title.text = definition["name"]
-            self.body.text = self.wrap(definition["text"])
+            lines = self.wrap(definition['text']).splitlines()
+            per_page = int(13/self.parent.text_scale)
+            pages = max(1,(len(lines)+per_page-1)//per_page)
+            self.note_page = min(self.note_page,pages-1)
+            self.body.text = '\n'.join(lines[self.note_page*per_page:(self.note_page+1)*per_page])
             self.detail.text = ""
-            self.footer.text = "Esc/Tab: close | Note kept in inventory. Gameplay continues."
+            self.footer.text = f"Page {self.note_page+1}/{pages} | PgUp/PgDn: read pages\nEsc/Tab: close | Note kept. Gameplay continues."
         else:
             self.title.text = "DINING LOCKBOX"
             self.body.text = f"Four wheels:  {self.digits.ljust(4, '_')}\n\n" + self.wrap(self.status or "The keeper's instructions and kitchen tally explain the order.")
             self.detail.text = ""
             self.footer.text = "0-9: enter digits | Backspace: erase | Enter: submit\nEsc/Tab: close | Gameplay continues."
+        self.footer.text = '\n'.join(textwrap.fill(line,width=int(76/self.parent.text_scale)) for line in
+                                     self.parent.control_text(self.footer.text).splitlines())
+        self.layout(self.parent._aspect)
 
     def handle(self, key):
-        if key in ("escape", "tab"):
+        if key in ('escape',self.player.bindings['inventory']):
             self.close()
             return
+        if self.mode == 'note' and key in ('page up','page down'):
+            self.note_page = max(0,self.note_page+(-1 if key=='page up' else 1))
         if self.mode == "combination":
             if key.isdigit() and len(key) == 1 and len(self.digits) < 4:
                 self.digits += key
@@ -194,7 +215,7 @@ class GameplayPanel(Entity):
                 elif key == "backspace":
                     self.confirming = False
                     self.status = ""
-                elif key == "u" and item_id == "battery":
+                elif key == self.player.bindings['use_item'] and item_id == "battery":
                     self.confirming = True
                     self.status = "Use one battery? Enter confirms; Backspace cancels."
                 elif key == "enter":

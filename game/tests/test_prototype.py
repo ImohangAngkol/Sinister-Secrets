@@ -8,6 +8,7 @@ import math
 import random
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import patch
 
 from panda3d.core import Filename, FogAttrib, LightAttrib, loadPrcFileData
@@ -19,6 +20,7 @@ from ursina import Entity, Ursina, Vec3, application, camera, color, destroy, he
 
 from game.game_manager import GameManager
 from game.settings import Preferences
+from game.systems.save_manager import SaveManager
 from game.ghost.ghost_navigation import astar
 from game.ghost.ghost_hearing import can_hear_player
 from game.ghost.ghost_states import GhostState
@@ -68,7 +70,10 @@ class PrototypeTests(unittest.TestCase):
         held_keys.clear()
         mouse.velocity = Vec3(0, 0, 0)
         time.dt = time.dt_unscaled = 1 / 60
-        self.manager = GameManager(preferences=Preferences(path=None))
+        self.save_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.save_directory.cleanup)
+        self.manager = GameManager(preferences=Preferences(path=None), save_manager=SaveManager(self.save_directory.name))
+        self.manager.automatic_checkpoints = False  # Legacy fixtures may inject items instead of collecting them.
         self.manager.start_game()
         self.manager.update()  # Consume the first clean session frame.
         time.dt = time.dt_unscaled = 1 / 60
@@ -145,7 +150,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_menu_mouse_routes_to_selected_row_without_duplicate_actions(self):
         self.manager.return_to_menu()
-        with patch.object(mouse, 'hovered_entity', self.manager.main_menu.rows[1][0]):
+        with patch.object(mouse, 'hovered_entity', self.manager.main_menu.rows[2][0]):
             self.app.input('left mouse down', is_raw=True)
         self.assertEqual(self.manager.state, 'settings')
         self.assertIsNone(self.manager.scene_manager)
@@ -423,7 +428,7 @@ class PrototypeTests(unittest.TestCase):
     def test_menu_quit_button_disposes_session_before_quitting(self):
         current = self.manager.scene_manager
         self.manager.pause_game()
-        self.manager.pause_menu.selected = 4
+        self.manager.pause_menu.selected = 5
         with patch('game.game_manager.application.quit') as quit_call:
             self.app.input('enter', is_raw=True)
             quit_call.assert_called_once_with()
@@ -1118,7 +1123,7 @@ class PrototypeTests(unittest.TestCase):
         self.player._update_flashlight()
         self.assertEqual(self.player.stats.battery, start)
         self.assertEqual(self.player.flashlight_light.color.r, 0)
-        self.player.stats.battery = 1
+        self.player.stats.battery = FLASHLIGHT_DRAIN_PER_SECOND / 2
         self.player.input("f")
         self.player._update_flashlight()
         self.assertEqual(self.player.stats.battery, 0)
@@ -1353,6 +1358,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(self.player.stats.noise_level, 0)
 
     def test_flashlight_drain_and_flicker_timeline_at_four_frame_rates(self):
+        self.player.reduced_flicker = False  # Preserve the original flicker branch regression.
         reference = None
         for fps in (4, 30, 60, 120):
             self.player.has_flashlight = True
@@ -1368,7 +1374,7 @@ class PrototypeTests(unittest.TestCase):
                     if (frame + 1) % (fps // 2) == 0:
                         samples.append(self.player._flicker_dark)
                 result = (samples, uniform.call_count, self.player._flicker_dark)
-            self.assertAlmostEqual(self.player.stats.battery, 7, delta=0.00001)
+            self.assertAlmostEqual(self.player.stats.battery, 14-2*FLASHLIGHT_DRAIN_PER_SECOND, delta=0.00001)
             if reference is None:
                 reference = result
                 remaining = self.player._flicker_remaining
@@ -1628,6 +1634,7 @@ class PrototypeTests(unittest.TestCase):
         self.assertLess(sum(min(rgb) > 245 for rgb in pixels) / len(pixels), 0.05)
 
     def test_native_flashlight_activation_flicker_depletion_and_registration(self):
+        self.player.reduced_flicker = False  # Explicitly test traditional flicker, not accessibility dimming.
         light = self.player.flashlight_light
         native = light._light
         registered = self.app.render.get_state().get_attrib(LightAttrib)
@@ -2365,6 +2372,441 @@ class PrototypeTests(unittest.TestCase):
         self.assertIs(ai.inspection_target, spot)
         self.assertEqual(ai.state, GhostState.SEARCH)
 
+
+    # Milestone 7 uses real level pickups, not injected inventory rewards.
+    def persistence_fixture(self, complete=False):
+        for name in ('foyer_flashlight','living_instructions','storage_fuse'):
+            self.house.pickups[name].interact(self.player)
+            self.manager.hud.panel.close()
+        self.player.progression.install_fuse()
+        if complete:
+            self.house.pickups['kitchen_tally'].interact(self.player)
+            self.manager.hud.panel.close()
+            self.player.progression.try_combination(self.house.level.house['progression']['combination'])
+            self.player.progression.remove_boards()
+            self.house.pickups['bedroom_exit_key'].interact(self.player)
+        self.player.position=Vec3(0,0,-8)
+        self.player.rotation_y=31
+        self.player.camera_pivot.rotation_x=-17
+        camera.rotation=Vec3(2,3,0)
+        self.ghost.position=Vec3(self.house.ghost_spawn)
+        self.player.stats.battery=42
+        self.player.stats.stamina=38
+        self.player.stats.regen_delay=.5
+        self.player.toggle_flashlight()
+
+    def rebind_session_refs(self):
+        self.player,self.house,self.ghost=(self.manager.scene_manager.player,self.manager.scene_manager.house,self.manager.scene_manager.ghost)
+        self.ghost.enabled=False
+        self.manager.update()
+        time.dt=time.dt_unscaled=1/60
+
+    def test_save_restores_authoritative_player_inventory_notes_and_power(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        self.assertTrue(self.manager.save_game())
+        data=self.manager.save_manager.load()
+        self.player.stats.battery=1
+        self.manager.return_to_menu()
+        self.assertNotIn(1,self.manager.main_menu.disabled_rows)
+        self.assertTrue(self.manager.continue_game())
+        self.rebind_session_refs()
+        self.assertEqual(list(self.player.position),data['player']['position'])
+        self.assertEqual(self.player.rotation_y,31)
+        self.assertEqual(self.player.camera_pivot.rotation_x,-17)
+        self.assertEqual(list(camera.rotation),[2,3,0])
+        self.assertEqual(self.player.stats.battery,42)
+        self.assertEqual(self.player.stats.stamina,38)
+        self.assertAlmostEqual(self.player.stats.regen_delay,.5)
+        self.assertTrue(self.player.flashlight_on)
+        self.assertGreater(self.player.flashlight_light.color.r,0)
+        self.assertEqual(self.player.inventory.quantities,data['inventory'])
+        self.assertTrue(self.player.progression.power_restored)
+        self.assertEqual(self.player.inventory.count('fuse'),0)
+        self.assertTrue(self.house.pickups['storage_fuse'].is_empty())
+        self.assertTrue(self.house.pickups['kitchen_tally'].enabled)
+        self.manager.hud.panel.open_note(self.player,'household_order')
+        self.assertTrue(self.manager.hud.panel.body.text)
+        self.assertIn('lockbox',self.player.progression.objective)
+
+    def test_save_safety_blocks_danger_hidden_modal_door_and_terminal_states(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        for state in (GhostState.CHASE,GhostState.JUMPSCARE):
+            self.ghost.ai.state=state
+            self.assertFalse(self.manager.save_game())
+        self.ghost.ai.state=GhostState.PATROL
+        self.ghost.ai.detection=.3
+        self.assertFalse(self.manager.save_game())
+        self.ghost.ai.detection=0
+        self.house.exit_door.opening=True
+        self.assertFalse(self.manager.save_game())
+        self.house.exit_door.opening=False
+        self.player.hiding_spot=self.house.hiding_spots[0]
+        self.assertFalse(self.manager.save_game())
+        self.player.hiding_spot=None
+        self.manager.hud.panel.open_inventory(self.player)
+        self.assertFalse(self.manager.save_game())
+        self.manager.hud.panel.close()
+        for state in ('playing','jumpscare','dead','escaped','menu'):
+            self.manager.state=state
+            self.assertFalse(self.manager.save_game())
+        self.assertFalse(self.manager.save_manager.exists())
+
+    def test_save_success_only_after_write_and_cooldown_prevents_spam(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        with patch.object(self.manager.save_manager,'save',side_effect=PermissionError('fixture')):
+            self.assertFalse(self.manager.save_game())
+        self.assertIn('failed',self.manager.pause_menu.subtitle_text.text.lower())
+        self.assertFalse(self.manager.save_manager.exists())
+        self.assertTrue(self.manager.save_game())
+        before=self.manager.save_manager.path('manual').read_bytes()
+        self.player.stats.battery=2
+        self.assertFalse(self.manager.save_game())
+        self.assertEqual(self.manager.save_manager.path('manual').read_bytes(),before)
+        self.assertEqual(self.manager.state,'paused')
+        self.assertTrue(application.paused)
+
+    def test_save_continue_disabled_without_data_and_new_game_requires_confirmation(self):
+        self.assertIn(1,self.manager.main_menu.disabled_rows)
+        self.persistence_fixture()
+        self.manager.automatic_checkpoints=True
+        self.manager._checkpoints()
+        self.manager.pause_game()
+        self.assertTrue(self.manager.save_game())
+        manual=self.manager.save_manager.path('manual').read_bytes()
+        self.manager.return_to_menu()
+        self.assertFalse(self.manager.start_game())
+        self.assertEqual(self.manager.state,'confirm_new')
+        self.assertIsNone(self.manager.scene_manager)
+        self.manager.cancel_new_game()
+        self.assertTrue(self.manager.save_manager.path('checkpoint').exists())
+        self.manager.start_game()
+        self.manager.confirm_new_game()
+        self.rebind_session_refs()
+        self.assertFalse(self.player.inventory.quantities)
+        self.assertFalse(self.player.progression.power_restored)
+        self.assertFalse(self.manager.save_manager.path('checkpoint').exists())
+        self.assertEqual(self.manager.save_manager.path('manual').read_bytes(),manual)
+
+    def test_save_invalid_data_never_mutates_current_session(self):
+        self.manager.pause_game()
+        original=self.manager.scene_manager
+        parent=camera.parent
+        for content in ('{','[]','{"version":99}'):
+            self.manager.save_manager.path('manual').write_text(content)
+            self.assertFalse(self.manager.load_game())
+            self.assertIs(self.manager.scene_manager,original)
+            self.assertEqual(camera.parent,parent)
+            self.assertEqual(self.manager.state,'paused')
+
+    def test_save_obstructed_position_rolls_back_staging_without_light_or_entity_leak(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        data=SaveManager.capture(self.manager.scene_manager,self.manager.session_id)
+        data['player']['position']=[2,0,-8]  # Authored hall boundary wall.
+        self.manager.save_manager.save(data)
+        self.app.taskMgr.step()
+        original=self.manager.scene_manager
+        original_hud=self.manager.hud
+        parent=camera.parent
+        before=sum(not e.is_empty() for e in scene.entities)
+        lights=self.app.render.get_state().get_attrib(LightAttrib)
+        self.assertFalse(self.manager.load_game())
+        self.app.taskMgr.step()
+        self.assertIs(self.manager.scene_manager,original)
+        self.assertIs(self.manager.hud,original_hud)
+        self.assertEqual(camera.parent,parent)
+        self.assertEqual(sum(not e.is_empty() for e in scene.entities),before)
+        self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib),lights)
+
+    def test_save_constructor_failure_preserves_outgoing_camera_world_and_lights(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        self.manager.save_game()
+        self.app.taskMgr.step()
+        before=sum(not e.is_empty() for e in scene.entities)
+        original=self.manager.scene_manager
+        lights=self.app.render.get_state().get_attrib(LightAttrib)
+        def broken(*args):
+            from ursina import AmbientLight
+            AmbientLight(parent=scene)
+            Entity(parent=scene,model='cube')
+            raise RuntimeError('constructor fixture')
+        with patch('game.game_manager.SceneManager',side_effect=broken):
+            self.assertFalse(self.manager.load_game())
+        self.app.taskMgr.step()
+        self.assertIs(self.manager.scene_manager,original)
+        self.assertEqual(camera.parent,original.player.camera_pivot)
+        self.assertEqual(sum(not e.is_empty() for e in scene.entities),before)
+        self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib),lights)
+
+    def test_save_checkpoint_defers_danger_and_records_safe_resource_snapshot(self):
+        self.persistence_fixture()
+        self.manager.automatic_checkpoints=True
+        self.ghost.ai.state=GhostState.CHASE
+        self.manager._checkpoints()
+        self.assertIsNone(self.manager.save_manager.load('checkpoint'))
+        self.ghost.ai.state=GhostState.PATROL
+        self.ghost.position=Vec3(0,0,-14)
+        self.manager._checkpoints()
+        self.assertIsNone(self.manager.save_manager.load('checkpoint'))
+        self.ghost.position=Vec3(self.house.ghost_spawn)
+        self.manager._checkpoints()
+        data=self.manager.save_manager.load('checkpoint')
+        self.assertEqual(data['milestone'],'power')
+        self.assertEqual(data['player']['position'],list(self.house.nav_nodes['foyer']))
+        self.assertTrue(self.player.can_occupy(Vec3(*data['player']['position'])))
+        self.assertEqual(data['player']['battery'],42)
+        self.assertEqual(data['player']['stamina'],38)
+        before=self.manager.save_manager.path('checkpoint').read_bytes()
+        self.manager._checkpoints()
+        self.assertEqual(self.manager.save_manager.path('checkpoint').read_bytes(),before)
+        self.player.progression.try_combination(self.house.level.house['progression']['combination'])
+        self.manager._checkpoints()
+        self.assertEqual(self.manager.save_manager.load('checkpoint')['milestone'],'lockbox')
+        self.player.progression.remove_boards()
+        self.house.pickups['bedroom_exit_key'].interact(self.player)
+        self.manager._checkpoints()
+        self.assertEqual(self.manager.save_manager.load('checkpoint')['milestone'],'exit_key')
+
+    def test_save_retry_clears_ghost_horror_and_restores_without_duplicate_rewards(self):
+        self.persistence_fixture(complete=True)
+        self.manager.automatic_checkpoints=True
+        self.manager._checkpoints()
+        data=self.manager.save_manager.load('checkpoint')
+        self.ghost.ai.detection=1
+        self.ghost.ai.last_known_player_position=Vec3(self.player.position)
+        self.player.stats.emit_noise(self.player.position,8,'fixture')
+        self.manager.game_over()
+        self.assertNotIn(2,self.manager.end_screen.disabled_rows)
+        self.assertTrue(self.manager.retry_checkpoint())
+        self.rebind_session_refs()
+        self.assertEqual(self.ghost.ai.state,GhostState.PATROL)
+        self.assertEqual(self.ghost.ai.detection,0)
+        self.assertIsNone(self.ghost.ai.last_known_player_position)
+        self.assertFalse(self.player.stats.noise_events)
+        self.assertEqual(self.ghost.ai.grace_time,5)
+        self.assertGreaterEqual((self.ghost.position-self.player.position).length(),12)
+        self.assertIsNone(self.manager.scene_manager.horror.active)
+        self.assertEqual(self.manager.scene_manager.horror.director.tension,0)
+        self.assertIsNone(self.ghost.jumpscare.proxy)
+        self.assertEqual(self.player.stats.battery,data['player']['battery'])
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+        self.assertEqual(self.player.inventory.count('exit_key'),1)
+        self.assertFalse(self.player.progression.try_combination('2417'))
+        self.assertTrue(self.house.pickups['bedroom_exit_key'].is_empty())
+        self.ghost.position=self.player.position+Vec3(0,0,.8)
+        time.dt=1
+        self.ghost.ai.update()
+        self.assertEqual(self.manager.state,'playing')
+        self.assertEqual(self.ghost.ai.state,GhostState.PATROL)
+
+    def test_save_load_cancels_active_paranormal_effects_and_callback(self):
+        self.persistence_fixture()
+        self.manager.pause_game()
+        self.assertTrue(self.manager.save_game())
+        self.manager.resume_game()
+        self.manager.update()
+        horror=self.manager.scene_manager.horror
+        horror.next_allowed=0
+        horror.director.tension=.9
+        self.player.position=Vec3(self.house.nav_nodes['main_hall'])
+        self.assertTrue(horror.start_event('apparition'))
+        temporary=horror.active['temporary'][0]
+        self.manager.pause_game()
+        self.assertTrue(self.manager.load_game())
+        self.assertTrue(temporary.is_empty())
+        self.assertFalse(horror.running)
+        self.assertIsNone(self.manager.scene_manager.horror.active)
+
+    def test_save_complete_progression_and_open_exit_survive_load_then_escape(self):
+        self.persistence_fixture(complete=True)
+        self.house.exit_door.interact(self.player)
+        time.dt=.8
+        self.house.exit_door.update()
+        self.manager.pause_game()
+        self.assertTrue(self.manager.save_game())
+        self.assertTrue(self.manager.load_game())
+        self.rebind_session_refs()
+        self.assertTrue(self.house.exit_door.opened)
+        self.assertIsNone(self.house.exit_door.collider)
+        self.assertTrue(self.house.pickups['bedroom_exit_key'].is_empty())
+        self.assertFalse(self.house.puzzles['boards'].enabled)
+        self.assertFalse(self.house.basement_door.opened)
+        self.player.position=Vec3(0,0,18.2)
+        self.house.exit_door.update()
+        self.assertEqual(self.manager.state,'escaped')
+
+    def test_save_repeated_load_pause_and_retry_have_stable_entity_light_task_counts(self):
+        self.persistence_fixture()
+        self.manager.automatic_checkpoints=True
+        self.manager._checkpoints()
+        self.manager.pause_game()
+        self.assertTrue(self.manager.save_game())
+        counts=[]
+        for cycle in range(12):
+            if cycle%2:
+                self.manager.game_over()
+                self.assertTrue(self.manager.retry_checkpoint())
+            else:
+                self.manager.pause_game()
+                self.assertTrue(self.manager.load_game())
+            self.ghost=self.manager.scene_manager.ghost
+            self.ghost.enabled=False
+            self.manager.update()
+            time.dt=0
+            self.app.taskMgr.step()
+            self.app.taskMgr.step()
+            active=[e for e in scene.entities if not e.is_empty()]
+            counts.append((len(active),len(scene.collidables),self.app.render.get_state().get_attrib(LightAttrib).get_num_on_lights(),len(self.app.taskMgr.getAllTasks())))
+            self.assertEqual(sum(e.__class__.__name__=='Ghost' for e in active),1)
+        self.assertEqual(len(set(counts)),1,counts)
+
+    def test_save_rebind_movement_interact_flashlight_inventory_use_and_escape(self):
+        bindings=self.manager.preferences.values['bindings'].copy()
+        bindings.update(forward='i',sprint='o',crouch='c',interact='q',flashlight='g',inventory='b',use_item='j',pause='p')
+        self.manager.preferences.save(dict(self.manager.preferences.values,bindings=bindings))
+        self.manager.apply_live_preferences()
+        self.player.input('q')
+        self.assertTrue(self.player.has_flashlight)
+        self.player.input('g')
+        self.assertTrue(self.player.flashlight_on)
+        self.player.position=Vec3(0,0,-10)
+        self.player.rotation_y=0
+        self.player.camera_pivot.rotation_x=0
+        camera.rotation=Vec3(0,0,0)
+        self.move('i',1,1/30)
+        self.assertAlmostEqual(self.player.z,-5,places=3)
+        self.assertFalse(held_keys['w'])
+        self.house.pickups['kitchen_battery'].interact(self.player)
+        self.player.stats.battery=40
+        self.app.input('b',is_raw=True)
+        self.assertEqual(self.manager.hud.panel.mode,'inventory')
+        self.manager.hud.panel.selected=self.manager.hud.panel.item_ids().index('battery')
+        self.app.input('j',is_raw=True)
+        self.assertTrue(self.manager.hud.panel.confirming)
+        self.app.input('enter',is_raw=True)
+        self.assertEqual(self.player.inventory.count('battery'),0)
+        self.assertEqual(self.player.stats.battery,75)
+        self.app.input('b',is_raw=True)
+        self.assertFalse(self.manager.hud.panel.active)
+        self.app.input('p',is_raw=True)
+        self.assertEqual(self.manager.state,'paused')
+        self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'playing')
+
+    def test_save_controls_capture_conflict_cancel_reset_and_nested_settings(self):
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.manager.open_controls()
+        self.manager.controls_screen.capture_binding(0)
+        self.app.input('s',is_raw=True)
+        self.assertEqual(self.manager.controls_screen.waiting,'forward')
+        self.assertIn('Conflicting',self.manager.controls_screen.status.text)
+        self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'controls')
+        self.manager.controls_screen.capture_binding(0)
+        self.app.input('i',is_raw=True)
+        self.assertEqual(self.player.bindings['forward'],'i')
+        self.assertIn('I',self.manager.controls_screen.rows[0][1].text)
+        self.manager.controls_screen.reset_defaults()
+        self.assertEqual(self.player.bindings['forward'],'w')
+        self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'settings')
+        self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'paused')
+
+    def test_save_text_scaling_and_note_pagination_at_three_window_aspects(self):
+        self.persistence_fixture()
+        for factor in (1,1.25,1.5):
+            self.manager.preferences.save(dict(self.manager.preferences.values,text_scale=factor))
+            self.manager.apply_live_preferences()
+            for width,height in ((640,480),(960,720),(1280,720)):
+                aspect=width/height
+                self.manager.hud.layout(aspect)
+                for screen in set(self.manager.screens.values()):
+                    screen.resize(aspect)
+                    self.assertAlmostEqual(screen.title_text.scale_x,getattr(screen.title_text,'base_font',1.8)*factor,places=5)
+                self.manager.hud.panel.open_note(self.player,'household_order')
+                self.manager.hud.panel.layout(aspect)
+                self.assertGreater(self.manager.hud.inventory_ui.y-self.manager.hud.inventory_ui.height*self.manager.hud.inventory_ui.scale_y,
+                                   self.manager.hud.panel.title.y*self.manager.hud.panel.scale_y)
+                self.assertAlmostEqual(self.manager.hud.panel.body.scale_x,.95*factor,places=5)
+                self.assertLessEqual(len(self.manager.hud.panel.body.text.splitlines()),int(13/factor))
+                self.manager.hud.panel.handle('page down')
+                self.assertTrue(self.manager.hud.panel.body.text)
+                self.manager.hud.panel.close()
+
+    def test_save_reduced_low_battery_flicker_is_steady_and_depletion_turns_light_off(self):
+        self.player.obtain_flashlight()
+        self.player.stats.battery=14
+        self.player.toggle_flashlight()
+        self.player.reduced_flicker=True
+        for fps in (4,30,60,120):
+            self.player.stats.battery=14
+            self.player.flashlight_on=True
+            colors=set()
+            for _ in range(fps*2):
+                time.dt=1/fps
+                self.player._update_flashlight()
+                colors.add(round(self.player.flashlight_light.color.r,5))
+            self.assertEqual(colors,{FLASHLIGHT_COLOR[0]*.75})
+            self.assertAlmostEqual(self.player.stats.battery,14-2*FLASHLIGHT_DRAIN_PER_SECOND)
+        self.player.stats.battery=.01
+        time.dt=1
+        self.player._update_flashlight()
+        self.assertEqual(self.player.stats.battery,0)
+        self.assertFalse(self.player.flashlight_on)
+        self.assertEqual(self.player.flashlight_light.color.r,0)
+
+    def test_save_battery_budget_is_finite_and_chase_stamina_defaults_unchanged(self):
+        from game import settings
+        self.assertEqual(settings.MAX_BATTERY,100)
+        supply=settings.FLASHLIGHT_START_BATTERY+self.house.level.items['battery']['restore']
+        self.assertEqual(supply,100)
+        self.assertEqual(supply/settings.FLASHLIGHT_DRAIN_PER_SECOND,400)
+        self.assertGreater(settings.PLAYER_SPRINT_SPEED,settings.GHOST_CHASE_SPEED)
+        self.assertGreater(settings.GHOST_CHASE_SPEED,settings.PLAYER_SPEED)
+        self.assertEqual(settings.STAMINA_MAX/settings.STAMINA_DRAIN_PER_SECOND,100/22)
+
+    def test_save_rebound_movement_retains_four_fps_speeds_noise_and_wall_sweeps(self):
+        from game import settings
+        bindings=dict(self.player.bindings,forward='i',backward='k',left='j',right='l',sprint='o',crouch='c',use_item='u')
+        self.manager.preferences.save(dict(self.manager.preferences.values,bindings=bindings))
+        self.manager.apply_live_preferences()
+        for fps in (4,30,60,120):
+            for key,axis,delta in (('i','z',1),('k','z',-1),('j','x',-1),('l','x',1)):
+                self.player.position=Vec3(0,0,-7)
+                self.player.rotation_y=self.player.camera_pivot.rotation_x=0
+                camera.rotation=Vec3(0,0,0)
+                # One quarter second is representable at all four frame rates.
+                self.move(key,.25,1/fps)
+                elapsed=round(.25*fps)/fps
+                self.assertAlmostEqual(getattr(self.player,axis),(-7 if axis=='z' else 0)+delta*5*elapsed,places=3)
+            self.player.position=Vec3(0,0,-10)
+            held_keys['o']=1
+            self.player.stats.stamina=100
+            self.player.stats.sprint_exhausted=False
+            self.move('i',1,1/fps)
+            self.assertAlmostEqual(self.player.z,-10+settings.PLAYER_SPRINT_SPEED,places=3)
+            self.player.position=Vec3(1.4,0,-8)
+            self.player.rotation_y=90
+            self.move('i',1,1/fps)
+            self.assertLess(self.player.x,2)
+            self.assertEqual(self.player.stats.noise_level,0)
+            held_keys.clear()
+
+    def test_save_checkpoint_of_another_run_is_not_a_death_retry(self):
+        self.persistence_fixture()
+        self.manager.automatic_checkpoints=True
+        self.manager._checkpoints()
+        self.manager.restart_game()
+        self.rebind_session_refs()
+        self.manager.game_over()
+        self.assertIn(2,self.manager.end_screen.disabled_rows)
+        self.assertFalse(self.manager.retry_checkpoint())
 
 if __name__ == "__main__":
     unittest.main()

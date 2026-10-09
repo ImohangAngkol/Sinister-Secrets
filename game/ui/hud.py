@@ -2,6 +2,9 @@
 from ursina import Entity, Text, camera, color, invoke
 from game.ui.interaction_prompt import InteractionPrompt
 from game.ui.inventory_ui import InventoryUI, GameplayPanel
+from game.settings import BINDING_DEFAULTS
+import re
+import textwrap
 
 
 class HUD(Entity):
@@ -9,6 +12,8 @@ class HUD(Entity):
         super().__init__(
             parent=camera.ui
         )
+        self.text_scale = 1.0
+        self.bindings = BINDING_DEFAULTS.copy()
 
         self.interaction_prompt = (
             InteractionPrompt()
@@ -48,20 +53,31 @@ class HUD(Entity):
         self.interaction_prompt.enabled = False
 
     def layout(self, aspect):
+        signature = (aspect,self.text_scale,self.panel.active,self.inventory_ui.text,
+                     self.ghost_state.text,self.message.text,self.objective.text,self.interaction_prompt.text)
+        if signature == getattr(self,'_layout_signature',None):
+            return
+        self._layout_signature = signature
         self._aspect = aspect
         self.inventory_ui.x = -aspect / 2 + 0.03
-        self.inventory_ui.scale = min(1.05, (aspect-.12)/max(self.inventory_ui.width,.001))
+        self.inventory_ui.scale = min(1.05*self.text_scale, (aspect-.12)/max(self.inventory_ui.width,.001))
         self.ghost_state.x = aspect / 2 - 0.03
+        self.ghost_state.scale = .82*self.text_scale
         # Modal text owns the center. New warnings remain visible below it.
-        self.message.y = -.455 if self.panel.active else .28
-        self.message.scale = min(.9 if self.panel.active else 1.15,
+        self.message.y = -.455 if self.panel.active else .22 if self.text_scale>1 else .28
+        self.message.scale = min((.9 if self.panel.active else 1.15)*self.text_scale,
                                  (aspect - 0.08) / max(self.message.width, 0.001))
         self.objective.x = -aspect/2+.03
-        self.objective.scale = min(.78, (aspect-.1)/max(self.objective.width,.001))
+        self.objective.scale = min(.78*self.text_scale, (aspect-.1)/max(self.objective.width,.001))
+        self.interaction_prompt.scale = min(1.1*self.text_scale,(aspect-.08)/max(self.interaction_prompt.width,.001))
         self.panel.layout(aspect)
 
+    def control_text(self, text):
+        mapping = {'E':'interact','F':'flashlight','U':'use_item','Tab':'inventory','Shift':'sprint','Ctrl':'crouch'}
+        return re.sub(r'\b(E|F|U|Tab|Shift|Ctrl)\b',lambda match:self.bindings[mapping[match.group()]].upper(),text)
+
     def set_objective(self, text):
-        self.objective.text = f"Objective: {text}"
+        self.objective.text = textwrap.fill(f"Objective: {text}",width=int(75/self.text_scale))
         self.objective.create_background(padding=.02, color=color.black66)
         self.layout(self._aspect)
 
@@ -72,17 +88,18 @@ class HUD(Entity):
     def set_prompt(self, text: str):
         if text:
             self.interaction_prompt.show(
-                text
+                self.control_text(text)
             )
         else:
             self.interaction_prompt.clear()
+        self.layout(self._aspect)
 
     def show_message(
         self,
         text: str,
         seconds: float = 2.0,
     ):
-        self.message.text = text
+        self.message.text = self.control_text(text)
         self.layout(self._aspect)
         self.message.enabled = True
         self.message.create_background(padding=0.025, color=color.black66)
