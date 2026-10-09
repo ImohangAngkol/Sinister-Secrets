@@ -2,6 +2,7 @@ from game.ghost.ghost import Ghost
 from game.player.player import HorrorPlayer
 from game.world.house import House
 from game.world.environment import create_environment
+from game.systems.progression import Progression
 from ursina import application, camera, destroy, scene
 
 
@@ -28,6 +29,9 @@ class SceneManager:
             rotation_y=self.house.level.spawns["player"]["rotation_y"],
         )
         self.player.camera_pivot.rotation_x = self.house.level.spawns["player"]["camera_pitch"]
+        self.player.inventory.definitions = self.house.level.items
+        self.player.progression = Progression(self.house, self.player)
+        self.player.progression.refresh()
 
         # =========================
         # GHOST

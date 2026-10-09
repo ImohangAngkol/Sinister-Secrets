@@ -10,8 +10,11 @@ Python/Ursina first-person horror prototype.
 - Hold Ctrl - Crouch (release to stand when headroom is clear)
 - E - Interact / enter wardrobe / leave hiding
 - F - Flashlight
+- Tab - Open/close inventory; Up/Down select; Enter inspect/read
+- U then Enter - Confirm use of the selected stored battery; Backspace cancels
+- 0-9 / Backspace / Enter - Enter, erase, and submit a lock combination
 - R - Restart after death/win
-- Esc - Quit
+- Esc - Close an open inventory/note/lock screen; quit when no screen is open
 
 ## Prototype 0.1
 
@@ -38,10 +41,166 @@ With the existing Windows virtual environment:
 .\.venv\Scripts\python.exe main.py
 ```
 
-The white pickup on the foyer console is the flashlight, the blue pickup on the
-kitchen counter is a battery, and the yellow pickup on the Bedroom Two bedside
-table is the exit key. Unlock the brown north exit with E, then walk through
-the opening to escape. The ghost uses placeholder geometry.
+The white pickup on the foyer console is the flashlight. Batteries are collected
+into inventory and used deliberately. Read the living-room note to begin the
+fuse, combination, and crowbar sequence below. The yellow exit key remains
+inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
+with E, then walk through the opening to escape. The ghost uses placeholder geometry.
+
+## Milestone 4: inventory, puzzles, and story progression
+
+This milestone adds a complete authored puzzle sequence to the existing house.
+The earlier milestone sections below record their historical behavior and tests;
+the current controls and progression in this section take precedence.
+
+Inventory, notes, and combination screens **keep gameplay active**. Ghost
+perception, pursuit, inspections, flashlight drain/flicker, stamina recovery, and
+hidden breathing continue. Movement, mouse look, E, and F are blocked while a
+screen is open. Close it before moving, leaving hiding, or toggling the torch.
+The pointer remains captured because these interfaces use keyboard controls.
+Opening/closing clears held keys and mouse velocity, requiring a fresh movement
+press. Escape closes a screen without also quitting or interacting with the world.
+Actual focus loss still pauses the game and releases capture; refocusing preserves
+the open screen. Death, escape, and R restart close screens and clean their state.
+
+Select an item with Up/Down. Names, descriptions, quantities, and inspection are
+available; Enter rereads stored notes. Select a battery and press U, then Enter
+to use one. Backspace cancels. Full charge or a missing flashlight keeps the
+battery. Enter alone does not use a battery, and repeated Enter cannot consume
+another after a completed confirmation. Keys, notes, and tools are unique;
+reusable tools cannot be consumed. Essential items cannot be dropped or discarded.
+
+| Item/interaction | Location | Approach `(x, z)` | Result |
+| --- | --- | --- | --- |
+| Flashlight | Foyer console | `(0, -16)` | F toggles the existing beam |
+| Keeper's Instructions | Living-room table | `(-6.8, -9)` | Stored note explains the order and fuse location |
+| Ceramic Fuse | Storage boxes beside east wall | `(-12.8, -2)` | Unique installation item |
+| Electrical box | Kitchen cabinet front | `(-11.4, 8.1)` | E installs fuse once and powers the dining lockbox |
+| Battery | Kitchen counter | `(-15, 5)` | Stored; restores up to 35% charge when confirmed |
+| Household Tally | Kitchen counter drawer | `(-15.3, 10.3)` | Available after power; counts complete the clue |
+| Four-wheel lockbox | Dining-room cabinet | `(-3.2, 8.5)` | Correct code awards the reusable crowbar once |
+| Boarded cabinet | Bedroom Two bedside console | `(7.2, 9)` | E with crowbar removes boards; tool kept |
+| Exit Key | Inside opened bedside cabinet | `(7.2, 9)` | Collect separately after removing boards |
+| Final exit | North exit area | `(0, 16.3)` | E unlocks; wait for opening, then walk through |
+
+Power changes the electrical box's indicator and unlock availability, without
+changing house ambient/fill lighting, flashlight brightness/shadows, or fog.
+Puzzle panels sit against furniture; they add no hallway barriers. All 15 areas,
+43 navigation nodes, 53 edges, and escape loops remain. Basement stays sealed.
+Wrong combinations have no attempt limit, cost, or permanent lockout. Installation,
+safe rewards, and board removal persist only for the current playthrough and reset
+on R. The key pickup is disabled until board removal; the tally is disabled until
+power. Reward items cannot be permanently lost through the interface.
+
+The objective HUD follows actual state: collect flashlight → find fuse → install
+fuse → read clues/open dining lockbox → pry bedroom cabinet → collect key → exit.
+It never displays the combination. Collected notes can be reread at any time.
+
+<details>
+<summary>Developer solution / manual-test spoiler</summary>
+
+The first note specifies portraits, bells, cradles, chairs. The tally gives two,
+four, one, seven respectively, so the authored combination is **2417**. This value
+lives in structured level data; the game HUD and lock screen do not reveal it.
+
+</details>
+
+### Validation and limits
+
+- Baseline: all 69 pre-milestone tests passed before editing.
+- Expanded suite: **88 tests passed in 67.804 seconds**: the 69 named cases are
+  retained, plus 19 regressions for quantities, unique items, guarded battery use,
+  modal controls/focus/resize, fuse/power, code attempts, crowbar, note rereading,
+  objectives/restarts, active ghost capture, hiding risk, dependencies, and escape.
+- The legacy battery cases now assert stored pickup followed by deliberate use;
+  legacy key/rendering checks explicitly set up completed puzzle gates. A new
+  end-to-end case walks the real controller through the entire gated sequence.
+- Level validation rejects unknown gates, missing rewards, cyclic dependencies,
+  invalid combinations, and room-external approaches. Existing collision, wall,
+  navigation, movement/FPS, lighting, survival, and restart tests remain active.
+- The native `main.py` smoke script uses actual engine key dispatch, W movement,
+  collision rays, notes/inventory, incorrect/correct code, crowbar, key, escape,
+  and R. The ghost is disabled only for deterministic puzzle routing and frozen
+  for lighting images; the same run separately exercises live inspection/capture.
+- All interface screenshots were visually reviewed, including 640×480 inventory.
+  Nine same-position flashlight OFF/ON comparisons passed; no new shader exceptions
+  or white-surface artifacts appeared. Settings AST matches the committed baseline.
+- This is scripted engine testing, **not human playtesting**. Native Windows was
+  available, so no Linux virtual display was needed. Programmatic focus loss was
+  refused by Windows; direct focus handling passed, while real Alt-Tab is unverified.
+- Startup timing on the RTX 3050 Laptop GPU was approximately 7 ms median; this
+  is a local scripted observation, not a minimum-spec or student-laptop benchmark.
+- Limits: keyboard-only interfaces, instant placeholder compartment interactions,
+  automatic crowbar reward, no saving, no full cinematics/audio, and only the existing
+  single battery pickup. Resource balance and reading/puzzle safety against a live
+  ghost need human playtesting. Existing perception and flashlight shadow limits
+  remain documented in the earlier milestone sections.
+
+Run validation from this project directory:
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q main.py game
+.\.venv\Scripts\python.exe -m unittest discover -s game/tests -v
+git diff --check
+.\.venv\Scripts\python.exe -m game.tests.windowed_smoke
+```
+
+Screenshots are generated test evidence, ignored by Git, and are not game assets:
+[inventory](game/tests/render_progression_inventory.png),
+[640×480 inventory](game/tests/render_progression_inventory_640x480.png),
+[battery confirmation](game/tests/render_progression_battery_confirmation.png),
+[keeper note](game/tests/render_progression_note.png),
+[tally](game/tests/render_progression_tally.png),
+[fuse box](game/tests/render_progression_fuse_box.png),
+[combination](game/tests/render_progression_combination.png),
+[objective](game/tests/render_progression_objective.png),
+[escape](game/tests/render_progression_escape.png).
+
+### Manual playtest
+
+1. Run `.\.venv\Scripts\python.exe main.py`. Collect the flashlight with E;
+   verify F and normal WASD/mouse/Shift/Ctrl controls.
+2. Read the living-room note with E. Try WASD, E, F, and mouse look while reading:
+   player controls should be blocked while the ghost and battery remain active.
+   Escape closes the note. Tab → select note → Enter should reread it.
+3. Try the fuse box, dining lockbox, boarded cabinet, and exit before obtaining
+   their requirements. Each should refuse safely with feedback.
+4. Follow the location table: collect storage fuse, install at kitchen box,
+   read released tally, infer code, open dining lockbox, take automatic crowbar,
+   pry bedroom boards, and collect the key. Try a wrong code and close/reopen the
+   lock before submitting the solution; retries must remain possible.
+5. Collect the blue kitchen battery. Select it in Tab inventory; U/Backspace
+   must cancel, U/Enter must use one, and a full flashlight must keep the item.
+6. Use hiding and alternate house routes while the ghost is active. Open each
+   screen during pursuit: it must not pause or grant immunity. Close quickly to
+   escape; reading while hidden must not disable breathing/inspection risk.
+7. Unlock the north exit with E, wait for the 0.8-second opening, then cross.
+   R after escape and after capture must clear inventory, puzzles, objectives,
+   hiding, and ghost memory without exceptions.
+8. Resize the window, Alt-Tab with each screen open, return, close the screen,
+   and press movement anew. Check pointer capture, legible text, and no stuck keys.
+
+### Files changed
+
+| Group | Files |
+| --- | --- |
+| New modules (existing directories) | `game/systems/progression.py`, `game/world/puzzles.py` |
+| Inventory/pickups | `game/items/inventory.py`, `game/items/item.py`, `game/items/battery.py`, `game/items/key.py` |
+| UI and controls | `game/ui/inventory_ui.py`, `game/ui/hud.py`, `game/game_manager.py`, `game/player/player.py`, `game/player/interaction.py` |
+| Level and construction | `game/scene_manager.py`, `game/world/house.py`, `game/levels/haunted_house.py`, `game/levels/haunted_house.json`, `game/data/items.json`, `game/data/spawn_points.json` |
+| Validation | `game/tests/test_inventory.py`, `game/tests/test_level_data.py`, `game/tests/test_prototype.py`, `game/tests/windowed_smoke.py` |
+| Documentation | `README.md` |
+
+No ghost AI/navigation, lighting settings, external assets, or house room geometry
+were replaced. No automatic commit, push, or merge was performed.
+
+### Suggested Milestone 5
+
+Start with human playtests to tune battery supply, clue readability, ghost pressure,
+and safe reading locations. Improve geometric affordances for opened compartments,
+then add accessibility options and remappable controls. After this sequence feels
+reliable, plan authored story beats and a small audio pass; design save/checkpoint
+semantics around puzzle and inventory state before implementing persistence.
 
 ## Rendering and gameplay fixes
 

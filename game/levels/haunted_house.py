@@ -106,6 +106,44 @@ def validate_level(level):
     exit_key = level.doors["exit_door"]["required_key"]
     if not any(item["item"] == exit_key for item in spawns["pickups"]):
         raise ValueError("The exit key must be available without unlocking the basement")
+    validate_progression(level)
+
+
+def validate_progression(level):
+    """Fixed-point dependency audit rejects cycles and missing essential rewards."""
+    data = level.house["progression"]
+    steps = data["steps"]
+    ids = {step["id"] for step in steps}
+    if len(ids) != len(steps):
+        raise ValueError("Duplicate puzzle state")
+    if len(data["combination"]) != 4 or not data["combination"].isascii() or not data["combination"].isdigit():
+        raise ValueError("Combination must contain four digits")
+    for step in steps:
+        if not set(step["requires_states"]) <= ids:
+            raise ValueError("Unknown puzzle dependency")
+        if not set(step["requires_items"] + step["grants_items"]) <= set(level.items):
+            raise ValueError("Unknown puzzle item")
+    pickups = level.spawns["pickups"]
+    if any(p.get("requires") and p["requires"] not in ids for p in pickups):
+        raise ValueError("Unknown pickup gate")
+    states, available = set(), set()
+    for _ in range(len(steps)+len(pickups)+1):
+        available.update(p["item"] for p in pickups if not p.get("requires") or p["requires"] in states)
+        for step in steps:
+            if set(step["requires_states"]) <= states and set(step["requires_items"]) <= available:
+                states.add(step["id"])
+                available.update(step["grants_items"])
+    if states != ids or level.doors["exit_door"]["required_key"] not in available:
+        raise ValueError("Puzzle dependency cycle or unreachable required item")
+    rooms = {r['id']: r for r in level.house['rooms']}
+    for entry in (*pickups, *data["props"]):
+        bounds = rooms[entry["room"]]["bounds"]
+        for position in (entry["position"], entry["approach"]):
+            x, _, z = position
+            if not bounds[0] < x < bounds[2] or not bounds[1] < z < bounds[3]:
+                raise ValueError("Puzzle approach outside room")
+    if {p["id"] for p in data["props"]} != {"fuse_box", "lockbox", "boards"}:
+        raise ValueError("Missing puzzle prop")
 
 
 def wall_segments(house):

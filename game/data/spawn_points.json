@@ -62,7 +62,54 @@
         7.2,
         0,
         9
+      ],
+      "requires": "boards_removed"
+    },
+    {
+      "id": "storage_fuse",
+      "item": "fuse",
+      "room": "storage",
+      "position": [
+        -11.4,
+        1.35,
+        -2
+      ],
+      "approach": [
+        -12.8,
+        0,
+        -2
       ]
+    },
+    {
+      "id": "living_instructions",
+      "item": "household_order",
+      "room": "living",
+      "position": [
+        -5,
+        0.75,
+        -9
+      ],
+      "approach": [
+        -6.8,
+        0,
+        -9
+      ]
+    },
+    {
+      "id": "kitchen_tally",
+      "item": "household_tally",
+      "room": "kitchen",
+      "position": [
+        -17,
+        1.15,
+        10.3
+      ],
+      "approach": [
+        -15.3,
+        0,
+        10.3
+      ],
+      "requires": "power_restored"
     }
   ]
 }

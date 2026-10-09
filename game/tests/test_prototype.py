@@ -85,6 +85,291 @@ class PrototypeTests(unittest.TestCase):
     def pickup(self, kind):
         return next(e for e in self.house.children if isinstance(e, kind))
 
+    def unlock_key_fixture(self):
+        """Set up completed puzzle gates for legacy key/rendering unit checks."""
+        self.player.inventory.add("fuse")
+        self.player.progression.install_fuse()
+        self.player.progression.try_combination(self.house.level.house["progression"]["combination"])
+        self.player.progression.remove_boards()
+
+    def test_progression_inventory_modal_blocks_input_but_not_simulation(self):
+        self.player.obtain_flashlight()
+        self.player.toggle_flashlight()
+        before = Vec3(self.player.position)
+        yaw = self.player.rotation_y
+        self.app.input('tab', is_raw=True)
+        self.assertTrue(self.manager.hud.panel.active)
+        self.assertFalse(application.paused)
+        self.app.input('w', is_raw=True)
+        self.app.input('f', is_raw=True)
+        self.app.input('e', is_raw=True)
+        mouse.velocity = Vec3(.4,.2,0)
+        charge = self.player.stats.battery
+        time.dt = .5
+        self.player.update()
+        self.assertEqual(self.player.position, before)
+        self.assertEqual(self.player.rotation_y, yaw)
+        self.assertLess(self.player.stats.battery, charge)
+        self.assertTrue(self.player.flashlight_on)
+        self.app.input('escape', is_raw=True)
+        self.assertFalse(self.manager.hud.panel.active)
+        self.assertFalse(held_keys['w'])
+        self.assertEqual(mouse.velocity, Vec3(0,0,0))
+        self.assertEqual(self.manager.state, 'playing')
+
+    def test_progression_battery_requires_confirmation_and_keeps_full_charge_item(self):
+        self.player.inventory.add('battery', 2)
+        self.manager.input('tab')
+        panel = self.manager.hud.panel
+        panel.handle('u')
+        panel.handle('backspace')
+        panel.handle('enter')
+        self.assertEqual(self.player.inventory.count('battery'),2)
+        panel.handle('u')
+        panel.handle('enter')
+        self.assertEqual(self.player.inventory.count('battery'),2)  # no flashlight
+        self.player.obtain_flashlight()
+        self.player.stats.battery = MAX_BATTERY
+        panel.handle('u')
+        panel.handle('enter')
+        self.assertEqual(self.player.inventory.count('battery'),2)
+        self.player.stats.battery = 10
+        panel.handle('u')
+        panel.handle('enter')
+        self.assertEqual(self.player.stats.battery,45)
+        self.assertEqual(self.player.inventory.count('battery'),1)
+        panel.handle('enter')
+        self.assertEqual(self.player.inventory.count('battery'),1)  # Enter repeat cannot spend twice
+
+    def test_progression_fuse_commits_once_and_does_not_change_world_lighting(self):
+        progression = self.player.progression
+        lights = [tuple(light.color) for light in self.manager.scene_manager.lights]
+        self.assertFalse(progression.install_fuse())
+        self.assertFalse(progression.power_restored)
+        self.assertFalse(self.house.pickups['kitchen_tally'].enabled)
+        self.player.inventory.add('fuse')
+        self.assertTrue(progression.install_fuse())
+        self.assertEqual(self.player.inventory.count('fuse'),0)
+        self.assertTrue(self.house.pickups['kitchen_tally'].enabled)
+        self.assertFalse(progression.install_fuse())
+        self.assertEqual(lights,[tuple(light.color) for light in self.manager.scene_manager.lights])
+
+    def test_progression_wrong_combinations_do_not_consume_items_or_lock_out(self):
+        progression = self.player.progression
+        code = self.house.level.house['progression']['combination']
+        self.assertFalse(progression.try_combination(code))
+        self.assertFalse(self.player.inventory.count('crowbar'))
+        self.player.inventory.add('fuse')
+        progression.install_fuse()
+        for code_attempt in ('0000','12','abcd','9999'):
+            self.assertFalse(progression.try_combination(code_attempt))
+        self.assertTrue(progression.try_combination(code))
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+        self.assertFalse(progression.try_combination(code))
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+
+    def test_progression_combination_keyboard_backspace_escape_and_retry(self):
+        self.player.inventory.add('fuse')
+        self.player.progression.install_fuse()
+        self.player.position = Vec3(-3.2,0,8.5)
+        self.house.puzzles['lockbox'].interact(self.player)
+        panel = self.manager.hud.panel
+        self.app.input('1',is_raw=True)
+        self.app.input('backspace',is_raw=True)
+        self.assertEqual(panel.digits,'')
+        self.app.input('enter',is_raw=True)
+        self.assertIn('all four',panel.status)
+        for digit in '0000': self.app.input(digit,is_raw=True)
+        self.app.input('enter',is_raw=True)
+        self.assertIn('Incorrect',panel.status)
+        self.assertEqual(panel.digits,'')
+        self.app.input('escape',is_raw=True)
+        self.house.puzzles['lockbox'].interact(self.player)
+        for digit in self.house.level.house['progression']['combination']:
+            self.app.input(digit,is_raw=True)
+        self.app.input('enter',is_raw=True)
+        self.assertFalse(panel.active)
+        self.assertTrue(self.player.progression.safe_unlocked)
+
+    def test_progression_boards_require_reusable_tool_and_guard_exit_key(self):
+        boards = self.house.puzzles['boards']
+        self.player.position = Vec3(7.2,0,9)
+        self.aim(self.house.pickups['bedroom_exit_key'].world_position)
+        self.assertIsNot(get_interaction_hit(self.player).entity,self.house.pickups['bedroom_exit_key'])
+        boards.interact(self.player)
+        self.assertFalse(self.player.progression.boards_removed)
+        self.assertFalse(self.house.pickups['bedroom_exit_key'].enabled)
+        self.unlock_key_fixture()
+        self.assertFalse(boards.enabled)
+        self.assertTrue(self.house.pickups['bedroom_exit_key'].enabled)
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+        self.assertFalse(self.player.progression.remove_boards())
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+
+    def test_progression_notes_are_collected_readable_and_unique(self):
+        note = self.house.pickups['living_instructions']
+        note.interact(self.player)
+        panel = self.manager.hud.panel
+        self.assertEqual(panel.mode,'note')
+        self.assertIn('portraits, bells, cradles, chairs', ' '.join(panel.body.text.split()))
+        self.assertEqual(self.player.inventory.count('household_order'),1)
+        self.assertFalse(self.player.inventory.add('household_order'))
+        self.app.input('e',is_raw=True)
+        self.assertEqual(panel.mode,'note')
+        self.app.input('escape',is_raw=True)
+        self.app.input('tab',is_raw=True)
+        self.app.input('enter',is_raw=True)
+        self.assertEqual(panel.mode,'note')
+        self.app.input('tab',is_raw=True)
+        self.assertFalse(panel.active)
+
+    def test_progression_objectives_and_restart_reset_every_puzzle(self):
+        progression = self.player.progression
+        self.assertIn('foyer flashlight',progression.objective)
+        self.player.obtain_flashlight()
+        self.assertIn('storage',progression.objective)
+        self.player.inventory.add('fuse')
+        progression.refresh()
+        self.assertIn('Install',self.manager.hud.objective.text)
+        progression.install_fuse()
+        self.assertIn('clues',progression.objective)
+        progression.try_combination(self.house.level.house['progression']['combination'])
+        self.assertIn('crowbar',progression.objective)
+        progression.remove_boards()
+        self.assertIn('Collect the exit key',progression.objective)
+        self.house.pickups['bedroom_exit_key'].interact(self.player)
+        self.assertIn('north exit',progression.objective)
+        self.manager.input('tab')
+        self.manager.game_over()
+        self.assertFalse(self.manager.hud.panel.active)
+        self.manager.input('r')
+        player = self.manager.scene_manager.player
+        self.assertFalse(player.progression.power_restored)
+        self.assertFalse(player.progression.safe_unlocked)
+        self.assertFalse(player.progression.boards_removed)
+        self.assertEqual(player.inventory.quantities,{})
+        self.assertFalse(self.manager.scene_manager.house.pickups['bedroom_exit_key'].enabled)
+        self.assertIn('foyer flashlight',self.manager.hud.objective.text)
+
+    def test_progression_ghost_can_catch_during_inventory_and_closes_interface(self):
+        self.player.position = Vec3(0,0,-8)
+        self.ghost.position = Vec3(0,0,-7.2)
+        self.ghost.rotation_y = 180
+        self.manager.input('tab')
+        self.ghost.ai.state = GhostState.CHASE
+        self.ghost.ai.detection = 1
+        self.ghost.ai.update()
+        self.assertEqual(self.manager.state,'dead')
+        self.assertFalse(self.manager.hud.panel.active)
+
+    def test_progression_focus_and_resize_preserve_modal_without_sticky_keys(self):
+        self.manager.input('tab')
+        panel = self.manager.hud.panel
+        self.manager.set_focus(False)
+        self.assertTrue(application.paused)
+        self.manager.input('escape')
+        self.assertTrue(panel.active)
+        self.manager.set_focus(True)
+        self.assertFalse(application.paused)
+        for aspect in (4/3,16/9,1):
+            self.manager.hud.layout(aspect)
+            self.assertLessEqual(1.18*panel.scale_x,aspect-.05)
+        self.manager.input('escape')
+        self.assertFalse(panel.active)
+        self.assertFalse(held_keys['w'])
+
+    def test_progression_hidden_inventory_preserves_breathing_risk_and_suppresses_look(self):
+        spot = self.house.hiding_spots[0]
+        self.player.position = Vec3(spot.approach)
+        self.assertTrue(self.player.enter_hiding(spot))
+        self.manager.input('tab')
+        before = Vec3(self.player.position)
+        yaw = self.player.rotation_y
+        mouse.velocity = Vec3(.5,.5,0)
+        for _ in range(13):
+            time.dt=1
+            self.player.update()
+        self.assertEqual(self.player.position,before)
+        self.assertEqual(self.player.rotation_y,yaw)
+        self.assertTrue(any(event.kind=='breathing' for event in self.player.stats.noise_events))
+        self.manager.input('e')
+        self.assertTrue(self.player.hidden)
+        self.manager.input('escape')
+        self.player.input('e')
+        self.assertFalse(self.player.hidden)
+
+    def test_progression_ghost_remains_active_during_note_and_combination(self):
+        self.player.position = Vec3(0,0,-8)
+        self.ghost.position = Vec3(0,0,-7.2)
+        self.ghost.rotation_y = 180
+        self.player.inventory.add('household_order')
+        self.manager.hud.panel.open_note(self.player,'household_order')
+        self.ghost.ai.state = GhostState.CHASE
+        self.ghost.ai.detection = 1
+        self.ghost.ai.update()
+        self.assertEqual(self.manager.state,'dead')
+        self.manager.restart_game()
+        player, ghost, house = (self.manager.scene_manager.player,self.manager.scene_manager.ghost,
+                                self.manager.scene_manager.house)
+        ghost.enabled=False
+        player.position, ghost.position, ghost.rotation_y = Vec3(-3.2,0,8.5),Vec3(-3.2,0,7.7),0
+        player.inventory.add('fuse')
+        player.progression.install_fuse()
+        house.puzzles['lockbox'].interact(player)
+        self.assertEqual(self.manager.hud.panel.mode,'combination')
+        ghost.ai.state=GhostState.CHASE
+        ghost.ai.detection=1
+        ghost.ai.update()
+        self.assertEqual(self.manager.state,'dead')
+        self.assertFalse(self.manager.hud.panel.active)
+
+    def test_progression_complete_chain_walks_real_routes_and_escapes(self):
+        current = 'foyer'
+        def visit(entry, entity):
+            nonlocal current
+            self.walk_route(current,entry['room'])
+            self.walk_to(entry['approach'])
+            self.aim(entity.world_position)
+            self.assertIs(get_interaction_hit(self.player).entity,entity)
+            self.player.input('e')
+            if self.manager.hud.panel.mode == 'note': self.manager.input('escape')
+            self.walk_to(self.house.nav_nodes[entry['room']]) if not self.manager.hud.panel.active else None
+            current = entry['room']
+        spawns = {entry['id']:entry for entry in self.house.level.spawns['pickups']}
+        props = {entry['id']:entry for entry in self.house.level.house['progression']['props']}
+        for item in ('foyer_flashlight','living_instructions','storage_fuse'):
+            visit(spawns[item],self.house.pickups[item])
+        visit(props['fuse_box'],self.house.puzzles['fuse_box'])
+        visit(spawns['kitchen_tally'],self.house.pickups['kitchen_tally'])
+        visit(props['lockbox'],self.house.puzzles['lockbox'])
+        for digit in '0000': self.manager.input(digit)
+        self.manager.input('enter')
+        self.assertFalse(self.player.progression.safe_unlocked)
+        for digit in self.house.level.house['progression']['combination']: self.manager.input(digit)
+        self.manager.input('enter')
+        self.walk_to(self.house.nav_nodes[current])
+        visit(props['boards'],self.house.puzzles['boards'])
+        visit(spawns['bedroom_exit_key'],self.house.pickups['bedroom_exit_key'])
+        self.walk_route(current,'exit_approach')
+        self.aim(Vec3(0,1.5,17.8))
+        self.player.input('e')
+        for _ in range(48):
+            time.dt=1/60
+            self.house.exit_door.update()
+        camera.rotation=Vec3(0,0,0)
+        self.player.rotation_y=0
+        self.player.camera_pivot.rotation_x=0
+        held_keys['w']=1
+        for _ in range(60):
+            time.dt=1/60
+            self.player.update()
+            self.house.exit_door.update()
+            if self.manager.state=='escaped': break
+        held_keys.clear()
+        self.assertEqual(self.manager.state,'escaped')
+        self.assertEqual(self.player.inventory.count('crowbar'),1)
+        self.assertFalse(self.house.basement_door.opened)
+
     def capture(self, name):
         # Render real frames; no mocked shaders, lighting, models or textures.
         for _ in range(4):
@@ -168,12 +453,22 @@ class PrototypeTests(unittest.TestCase):
         self.assertFalse(self.player.flashlight_on)
 
     def test_battery_and_key_pickups_with_real_rays(self):
+        self.unlock_key_fixture()
+        self.player.obtain_flashlight()
         battery = self.pickup(BatteryPickup)
         self.player.position = Vec3(*self.house.level.spawns["pickups"][1]["approach"])
         self.player.stats.battery = 10
         self.aim(battery.world_position)
         self.assertIs(get_interaction_hit(self.player).entity, battery)
         self.player.input("e")
+        self.assertEqual(self.player.stats.battery, 10)
+        self.assertEqual(self.player.inventory.count("battery"), 1)
+        self.manager.input("tab")
+        panel = self.manager.hud.panel
+        panel.selected = panel.item_ids().index("battery")
+        panel.handle("u")
+        panel.handle("enter")
+        panel.handle("escape")
         self.assertEqual(self.player.stats.battery, 45)
         self.player.add_battery(1000)
         self.assertEqual(self.player.stats.battery, MAX_BATTERY)
@@ -405,16 +700,25 @@ class PrototypeTests(unittest.TestCase):
             self.assertAlmostEqual(self.player._flicker_remaining, remaining, delta=0.00001)
 
     def test_full_charge_battery_remains_until_successful_interaction(self):
+        self.player.obtain_flashlight()
         pickup = self.pickup(BatteryPickup)
         self.player.position = Vec3(*self.house.level.spawns["pickups"][1]["approach"])
         self.aim(pickup.world_position)
         self.player.stats.battery = MAX_BATTERY
         self.player.input("e")
-        self.assertIn(pickup, self.house.children)
-        self.assertIn(pickup, scene.collidables)
+        self.assertNotIn(pickup, scene.collidables)
+        self.assertEqual(self.player.inventory.count("battery"), 1)
+        self.manager.input("tab")
+        self.manager.hud.panel.selected = self.manager.hud.panel.item_ids().index('battery')
+        self.manager.hud.panel.handle("u")
+        self.manager.hud.panel.handle("enter")
+        self.assertEqual(self.player.inventory.count("battery"), 1)
         self.assertIn("already full", self.manager.hud.message.text)
         self.player.stats.battery = 90
-        self.player.input("e")
+        self.manager.hud.panel.handle("u")
+        self.manager.hud.panel.handle("enter")
+        self.manager.hud.panel.handle("escape")
+        self.assertEqual(self.player.inventory.count("battery"), 0)
         self.assertEqual(self.player.stats.battery, MAX_BATTERY)
         self.assertNotIn(pickup, scene.collidables)
 
@@ -763,6 +1067,7 @@ class PrototypeTests(unittest.TestCase):
                 self.player.input("f")
 
     def test_real_beam_reveals_ghost_battery_key_and_exit_door(self):
+        self.unlock_key_fixture()
         camera.world_parent = scene
         self.player.obtain_flashlight()
         self.manager.hud.message.enabled = False
@@ -867,8 +1172,11 @@ class PrototypeTests(unittest.TestCase):
                                                    traverse_target=self.house).hit)
 
     def test_house_player_collects_objectives_and_escapes_without_basement(self):
+        self.unlock_key_fixture()
         current = "foyer"
         for spawn in self.house.level.spawns["pickups"]:
+            if spawn["item"] not in ("flashlight", "battery", "exit_key"):
+                continue
             self.walk_route(current, spawn["room"])
             self.walk_to(spawn["approach"])
             pickup = self.house.pickups[spawn["id"]]

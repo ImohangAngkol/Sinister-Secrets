@@ -63,3 +63,29 @@ class LevelDataTests(unittest.TestCase):
                        "from game.levels.haunted_house import load_level; print(load_level().house['id'])"]
             result = subprocess.run(command, cwd=elsewhere, capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.strip(), "haunted_house")
+
+    def test_circular_puzzle_dependencies_are_rejected(self):
+        level = deepcopy(self.level)
+        next(p for p in level.spawns['pickups'] if p['item']=='fuse')['requires'] = 'boards_removed'
+        with self.assertRaisesRegex(ValueError, 'dependency cycle'):
+            validate_level(level)
+
+    def test_unknown_gate_and_missing_tool_reward_are_rejected(self):
+        level = deepcopy(self.level)
+        level.spawns['pickups'][2]['requires'] = 'missing_state'
+        with self.assertRaisesRegex(ValueError, 'pickup gate'):
+            validate_level(level)
+        level = deepcopy(self.level)
+        level.house['progression']['steps'][1]['grants_items'] = []
+        with self.assertRaisesRegex(ValueError, 'dependency cycle'):
+            validate_level(level)
+
+    def test_puzzle_approaches_and_combination_are_validated(self):
+        level = deepcopy(self.level)
+        level.house['progression']['props'][0]['approach'] = [80,0,80]
+        with self.assertRaisesRegex(ValueError, 'approach'):
+            validate_level(level)
+        level = deepcopy(self.level)
+        level.house['progression']['combination'] = '12x4'
+        with self.assertRaisesRegex(ValueError, 'four digits'):
+            validate_level(level)

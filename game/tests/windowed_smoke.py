@@ -193,12 +193,142 @@ def verify_window(app):
                                 manager.scene_manager.ghost)
         assert not player.hidden and player.stats.stamina == 100
         assert all(spot.occupant is None for spot in house.hiding_spots)
+        # Complete the authored puzzle chain using real W movement/rays and
+        # engine keyboard dispatch. Disable the ghost ONLY for this deterministic
+        # route fixture; the live survival/capture sequence above remains intact.
+        ghost.enabled = False
+        from game.ghost.ghost_navigation import astar
+        from game.player.interaction import get_interaction_hit
+        current_room = 'foyer'
+
+        def walk_to(point):
+            point = Vec3(*point)
+            camera.rotation = Vec3(0,0,0)
+            player.camera_pivot.rotation_x = 0
+            held_keys.clear()
+            app.input('w',is_raw=True)
+            try:
+                for _ in range(1400):
+                    delta = Vec3(point.x-player.x,0,point.z-player.z)
+                    if delta.length() < .025:
+                        return
+                    player.rotation_y = math.degrees(math.atan2(delta.x,delta.z))
+                    before = Vec3(player.position)
+                    time.dt = time.dt_unscaled = min(1/30,delta.length()/5)
+                    frames(1)
+                    assert (player.position-before).length() > .000001, (point,before)
+                raise AssertionError(f'Route did not reach {point}')
+            finally:
+                app.input('w up',is_raw=True)
+
+        def visit(entry, entity):
+            nonlocal current_room
+            walk_to(house.nav_nodes[current_room])
+            for node in astar(current_room,entry['room'],house.nav_nodes,house.graph):
+                walk_to(house.nav_nodes[node])
+            walk_to(entry['approach'])
+            camera.look_at(entity.world_position)
+            assert get_interaction_hit(player).entity == entity, entry['id']
+            app.input('e',is_raw=True)
+            current_room = entry['room']
+
+        spawns = {entry['id']:entry for entry in house.level.spawns['pickups']}
+        props = {entry['id']:entry for entry in house.level.house['progression']['props']}
+        visit(spawns['foyer_flashlight'],house.pickups['foyer_flashlight'])
+        visit(spawns['living_instructions'],house.pickups['living_instructions'])
+        simulated_frames(2)
+        capture('render_progression_note.png')
+        app.input('escape',is_raw=True)
+        visit(spawns['storage_fuse'],house.pickups['storage_fuse'])
+        app.input('tab',is_raw=True)
+        assert manager.hud.panel.mode == 'inventory' and mouse.locked
+        simulated_frames(2)
+        capture('render_progression_inventory.png')
+        # Check compact screen layout in the actual window, not only arithmetic.
+        properties = WindowProperties()
+        properties.set_size(640,480)
+        app.win.request_properties(properties)
+        simulated_frames(8)
+        capture('render_progression_inventory_640x480.png')
+        properties.set_size(1280,720)
+        app.win.request_properties(properties)
+        simulated_frames(8)
+        app.input('tab',is_raw=True)
+        visit(props['fuse_box'],house.puzzles['fuse_box'])
+        assert player.progression.power_restored and player.inventory.count('fuse') == 0
+        app.input('f',is_raw=True)
+        simulated_frames(2)
+        capture('render_progression_fuse_box.png')
+        app.input('f',is_raw=True)
+        visit(spawns['kitchen_battery'],house.pickups['kitchen_battery'])
+        assert player.inventory.count('battery') == 1
+        charge = player.stats.battery
+        app.input('tab',is_raw=True)
+        panel = manager.hud.panel
+        while panel.item_ids()[panel.selected] != 'battery':
+            app.input('down arrow',is_raw=True)
+        app.input('u',is_raw=True)
+        simulated_frames(2)
+        capture('render_progression_battery_confirmation.png')
+        app.input('enter',is_raw=True)
+        assert player.inventory.count('battery') == 0 and player.stats.battery > charge
+        app.input('escape',is_raw=True)
+        visit(spawns['kitchen_tally'],house.pickups['kitchen_tally'])
+        simulated_frames(2)
+        capture('render_progression_tally.png')
+        app.input('escape',is_raw=True)
+        visit(props['lockbox'],house.puzzles['lockbox'])
+        for digit in '0000': app.input(digit,is_raw=True)
+        app.input('enter',is_raw=True)
+        assert not player.progression.safe_unlocked
+        simulated_frames(2)
+        capture('render_progression_combination.png')
+        for digit in house.level.house['progression']['combination']: app.input(digit,is_raw=True)
+        app.input('enter',is_raw=True)
+        assert player.progression.safe_unlocked and player.inventory.count('crowbar') == 1
+        visit(props['boards'],house.puzzles['boards'])
+        assert player.progression.boards_removed and player.inventory.count('crowbar') == 1
+        visit(spawns['bedroom_exit_key'],house.pickups['bedroom_exit_key'])
+        assert player.inventory.has_key('exit_key')
+        app.input('f',is_raw=True)
+        simulated_frames(2)
+        manager.hud.message.enabled = False
+        capture('render_progression_objective.png')
+        app.input('f',is_raw=True)
+        walk_to(house.nav_nodes[current_room])
+        for node in astar(current_room,'exit_approach',house.nav_nodes,house.graph):
+            walk_to(house.nav_nodes[node])
+        camera.look_at(Vec3(0,1.5,17.8))
+        app.input('e',is_raw=True)
+        simulated_frames(50)
+        assert house.exit_door.opened
+        camera.rotation = Vec3(0,0,0)
+        player.camera_pivot.rotation_x, player.rotation_y = 0,0
+        app.input('w',is_raw=True)
+        for _ in range(60):
+            simulated_frames(1)
+            if manager.state == 'escaped': break
+        app.input('w up',is_raw=True)
+        assert manager.state == 'escaped'
+        capture('render_progression_escape.png')
+        app.input('r',is_raw=True)
+        simulated_frames(2)
+        player, house, ghost = (manager.scene_manager.player, manager.scene_manager.house,
+                                manager.scene_manager.ghost)
+        assert not player.progression.power_restored and not player.inventory.quantities
+        print('PROGRESSION_WINDOW_OK: W/rays/E, notes, inventory/resize, fuse, wrong/correct code, reusable crowbar, key, exit, R reset; ghost disabled for route fixture')
         application.calculate_dt = calculate_dt
         mouse.enabled = mouse_enabled
         held_keys.clear()
         # Restore the flashlight for the unchanged OFF/ON visual comparisons.
         app.input("e", is_raw=True)
         assert player.has_flashlight
+        # Completed-gate fixture lets legacy light comparisons still inspect the
+        # real exit-key geometry. The full locked progression was tested above.
+        player.inventory.add('fuse')
+        player.progression.install_fuse()
+        player.progression.try_combination(house.level.house['progression']['combination'])
+        player.progression.remove_boards()
         print("SURVIVAL_WINDOW_OK: engine Ctrl/W/Shift/E, stamina, safe exit, live inspection/catch, R cleanup")
         player.enabled = False
         ghost.update = lambda: None  # Freeze AI only during image comparisons.

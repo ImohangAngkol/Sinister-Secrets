@@ -26,9 +26,11 @@ class KeyPickup(Item):
         )
 
     def interact(self, player):
-        player.inventory.add_key(
-            self.key_id
-        )
+        if not player.inventory.add_key(self.key_id):
+            player.hud.show_message("You already have this key.")
+            return
+        if player.progression:
+            player.progression.refresh()
 
         player.hud.refresh_inventory(
             player

@@ -68,6 +68,7 @@ class HorrorPlayer(FirstPersonController):
 
         self.hud = hud
         self.inventory = Inventory()
+        self.progression = None
         self.stats = PlayerStats()
         self.crouching = False
         self.sprinting = False
@@ -116,8 +117,18 @@ class HorrorPlayer(FirstPersonController):
         remaining = max(frame_dt, 0)
         noise_integral = 0.0
         self._hide_cooldown = max(0, self._hide_cooldown - max(frame_dt, 0))
+        if self.hud.panel.active and not self.hidden:
+            self.stats.advance(max(frame_dt, 0))
+            self.stats.noise_level = 0
+            self.sprinting = False
+            self._update_flashlight()
+            self.hud.set_prompt("")
+            return
         if self.hidden:
+            if self.hud.panel.active:
+                mouse.velocity = Vec3(0, 0, 0)
             self.camera_controller.update(max(frame_dt, 0))
+            mouse.velocity = velocity
             self.stats.advance(frame_dt)
             self.stats.noise_level = 0
             self.sprinting = False
@@ -279,6 +290,8 @@ class HorrorPlayer(FirstPersonController):
         return False
 
     def input(self, key):
+        if self.hud.panel.active:
+            return
         if key == "f":
             self.toggle_flashlight()
             return
@@ -298,6 +311,9 @@ class HorrorPlayer(FirstPersonController):
             return
 
         self.has_flashlight = True
+        self.inventory.add("flashlight")
+        if self.progression:
+            self.progression.refresh()
 
         self.hud.show_message(
             "Flashlight acquired. Press F to toggle it."
@@ -402,6 +418,7 @@ class HorrorPlayer(FirstPersonController):
         self.hud.refresh_inventory(self)
 
     def cleanup(self):
+        self.hud.panel.close()
         if self.hidden:
             self.hiding_spot.occupant = None
             self.hiding_spot = None

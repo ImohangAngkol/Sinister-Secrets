@@ -22,9 +22,7 @@ class BatteryPickup(Item):
         )
 
     def interact(self, player):
-        used = player.add_battery(
-            self.amount
-        )
-
-        if used:
+        if player.inventory.add("battery"):
+            player.hud.show_message("Battery stored. Tab: inventory; U then Enter: use.")
+            player.hud.refresh_inventory(player)
             destroy(self)

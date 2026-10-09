@@ -1,12 +1,79 @@
 {
   "flashlight": {
-    "type": "equipment"
+    "type": "equipment",
+    "name": "Flashlight",
+    "description": "Camera-mounted light. F toggles it; batteries restore charge.",
+    "unique": true
   },
   "battery": {
     "type": "consumable",
-    "restore": 35
+    "restore": 35,
+    "name": "Battery",
+    "description": "Restores up to 35% charge. U then Enter uses one stored battery.",
+    "consumable": true,
+    "unique": false
   },
   "exit_key": {
-    "type": "key"
+    "type": "key",
+    "name": "Exit Key",
+    "description": "Unlocks the north exit. Kept until escape.",
+    "unique": true
+  },
+  "fuse": {
+    "type": "puzzle",
+    "name": "Ceramic Fuse",
+    "description": "A single-use fuse for the kitchen electrical box. Install with E at the box.",
+    "unique": true,
+    "consumable": true,
+    "color": [
+      153,
+      121,
+      57
+    ],
+    "scale": [
+      0.18,
+      0.28,
+      0.18
+    ]
+  },
+  "crowbar": {
+    "type": "tool",
+    "name": "Crowbar",
+    "description": "Reusable tool. E at the boarded bedroom cabinet pries it open.",
+    "unique": true
+  },
+  "household_order": {
+    "type": "note",
+    "name": "The Keeper's Instructions",
+    "description": "A note from the living-room table. Enter to reread.",
+    "unique": true,
+    "color": [
+      160,
+      148,
+      121
+    ],
+    "scale": [
+      0.4,
+      0.035,
+      0.3
+    ],
+    "text": "I sealed the key before the footsteps returned. The dining lockbox holds my pry bar. Restore its power at the kitchen box; the spare fuse is in storage.\n\nThe four wheels follow this order: portraits, bells, cradles, chairs. The kitchen tally records what remains. Read each count as a single digit."
+  },
+  "household_tally": {
+    "type": "note",
+    "name": "Household Tally",
+    "description": "A kitchen drawer released when power returned. Enter to reread.",
+    "unique": true,
+    "color": [
+      160,
+      148,
+      121
+    ],
+    "scale": [
+      0.4,
+      0.035,
+      0.3
+    ],
+    "text": "Inventory before the house fell silent:\n\nChairs: seven.\nCradles: one.\nPortraits: two.\nBells: four.\n\nThe keeper wanted the counts in his order, never the order written here. The pry bar opens the boarded bedside cabinet in the second bedroom. Beyond its key lies the north exit."
   }
 }

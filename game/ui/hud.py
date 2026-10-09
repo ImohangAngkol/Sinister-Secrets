@@ -1,7 +1,7 @@
 
 from ursina import Entity, Text, camera, color, invoke
 from game.ui.interaction_prompt import InteractionPrompt
-from game.ui.inventory_ui import InventoryUI
+from game.ui.inventory_ui import InventoryUI, GameplayPanel
 
 
 class HUD(Entity):
@@ -28,6 +28,9 @@ class HUD(Entity):
         self.message_revision = 0
         self.message_sequence = None
         self._aspect = camera.aspect_ratio
+        self.objective = Text(parent=self, text="", origin=(-.5,.5),
+                              x=-camera.aspect_ratio/2+.03, y=-.24, scale=.78)
+        self.panel = GameplayPanel(self)
 
         # Keep this while developing the AI.
         self.ghost_state = Text(
@@ -47,8 +50,17 @@ class HUD(Entity):
     def layout(self, aspect):
         self._aspect = aspect
         self.inventory_ui.x = -aspect / 2 + 0.03
+        self.inventory_ui.scale = min(1.05, (aspect-.12)/max(self.inventory_ui.width,.001))
         self.ghost_state.x = aspect / 2 - 0.03
         self.message.scale = min(1.15, (aspect - 0.08) / max(self.message.width, 0.001))
+        self.objective.x = -aspect/2+.03
+        self.objective.scale = min(.78, (aspect-.1)/max(self.objective.width,.001))
+        self.panel.layout(aspect)
+
+    def set_objective(self, text):
+        self.objective.text = f"Objective: {text}"
+        self.objective.create_background(padding=.02, color=color.black66)
+        self.layout(self._aspect)
 
     def on_destroy(self):
         if self.message_sequence:

@@ -14,6 +14,9 @@ def get_interaction_hit(player):
 
 
 def update_interaction_prompt(player):
+    if player.hud.panel.active:
+        player.hud.set_prompt("")
+        return
     if player.hidden:
         player.hud.set_prompt("[E] Leave hiding spot")
         return

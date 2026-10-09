@@ -4,11 +4,13 @@ from ursina import Entity, Vec3, color
 from game.items.battery import BatteryPickup
 from game.items.flashlight import FlashlightPickup
 from game.items.key import KeyPickup
+from game.items.item import InventoryPickup
 from game.levels.haunted_house import load_level, room_connections, wall_segments
 from game.world.exit_door import ExitDoor
 from game.world.locked_door import LockedDoor
 from game.world.room import Room
 from game.world.waypoint import Waypoint
+from game.world.puzzles import PuzzleProp
 
 
 class House(Entity):
@@ -45,6 +47,8 @@ class House(Entity):
                position=(0, -0.15, 19.5), scale=(4, 0.3, 3), color=color.rgb32(60, 63, 66))
         self._build_navigation()
         self._place_items(on_escape)
+        self.puzzles = {definition["id"]: PuzzleProp(definition, parent=self)
+                        for definition in data["progression"]["props"]}
 
     def _wall(self, position, scale):
         return Entity(parent=self, model="cube", shader=None, collider="box",
@@ -85,9 +89,12 @@ class House(Entity):
                 item = FlashlightPickup(**args)
             elif kind == "battery":
                 item = BatteryPickup(amount=self.level.items[kind]["restore"], **args)
-            else:
+            elif self.level.items[kind]["type"] == "key":
                 item = KeyPickup(key_id=kind, key_name="Exit Key", **args)
+            else:
+                item = InventoryPickup(kind, self.level.items[kind], **args)
             item.spawn_id = spawn["id"]
+            item.enabled = not spawn.get("requires")
             self.pickups[spawn["id"]] = item
         exit_data, basement_data = self.level.doors["exit_door"], self.level.doors["basement_door"]
 

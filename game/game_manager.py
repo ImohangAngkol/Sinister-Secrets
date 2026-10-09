@@ -26,7 +26,7 @@ class GameManager(Entity):
         )
 
         self.hud.show_message(
-            "Find the flashlight, locate the exit key, and escape.",
+            "Find the flashlight. Tab opens inventory; E interacts. Read the living-room note.",
             seconds=4,
         )
         self.window_events = DirectObject()
@@ -35,6 +35,15 @@ class GameManager(Entity):
         self._layout_size = None
 
     def input(self, key):
+        player = self.scene_manager.player
+        if not self._focused:
+            return True
+        if self.state == "playing" and self.hud.panel.active:
+            self.hud.panel.handle(key)
+            return True
+        if key == "tab" and self.state == "playing":
+            self.hud.panel.open_inventory(player)
+            return True
         if key == "escape":
             application.quit()
 
@@ -50,7 +59,7 @@ class GameManager(Entity):
         self.hud.enabled = True
         self.hud.set_prompt("")
         self.scene_manager = SceneManager(self.hud, self.win_game, self.game_over)
-        self.hud.show_message("Find the flashlight, locate the exit key, and escape.", seconds=4)
+        self.hud.show_message("Find the flashlight. Read the living-room note; Tab opens inventory.", seconds=4)
         if not self._focused:
             mouse.locked = False
 
