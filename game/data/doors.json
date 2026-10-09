@@ -1,5 +1,44 @@
 {
   "exit_door": {
-    "required_key": "exit_key"
+    "required_key": "exit_key",
+    "room": "exit_area",
+    "position": [
+      -1.5,
+      0,
+      17.8
+    ],
+    "scale": [
+      3,
+      3.2,
+      0.35
+    ],
+    "rotation_y": 0,
+    "locked_message": "The exit is locked. Find the exit key.",
+    "approach": [
+      0,
+      0,
+      16.3
+    ]
+  },
+  "basement_door": {
+    "required_key": "basement_key",
+    "room": "basement_entrance",
+    "position": [
+      15.6,
+      0,
+      -4.8
+    ],
+    "scale": [
+      2.4,
+      3.2,
+      0.3
+    ],
+    "rotation_y": 90,
+    "locked_message": "The basement is sealed. This area will open in a future milestone.",
+    "approach": [
+      14,
+      0,
+      -6
+    ]
   }
 }

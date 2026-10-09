@@ -14,6 +14,7 @@ class Ghost(Entity):
         hud,
         on_caught,
         collision_root=None,
+        patrol_targets=None,
         **kwargs,
     ):
 
@@ -61,6 +62,7 @@ class Ghost(Entity):
             hud=hud,
             jumpscare=self.jumpscare,
             collision_root=collision_root,
+            patrol_targets=patrol_targets,
         )
 
     def update(self):

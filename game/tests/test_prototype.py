@@ -4,6 +4,7 @@ Run: .venv/Scripts/python.exe -m unittest discover -s game/tests -v
 Mouse capture is bypassed ONLY here because GraphicsBuffer has no window pointer.
 """
 import importlib
+import math
 import random
 from pathlib import Path
 import unittest
@@ -27,6 +28,7 @@ from game.items.key import KeyPickup
 from game.player.interaction import get_interaction_hit
 from game.settings import FLASHLIGHT_DRAIN_PER_SECOND, MAX_BATTERY
 from game.ghost.ghost_navigation import GhostNavigation
+from game.world.environment import world_raycast
 
 
 class PrototypeTests(unittest.TestCase):
@@ -103,11 +105,11 @@ class PrototypeTests(unittest.TestCase):
         self.player.camera_pivot.rotation_x = 0
         for key, axis, expected in (("w", "z", 1), ("s", "z", -1),
                                     ("a", "x", -1), ("d", "x", 1)):
-            self.player.position = Vec3(-8, 0, -8)
+            self.player.position = Vec3(0, 0, -8)
             start = getattr(self.player, axis)
             self.move(key, seconds=0.2)
             self.assertAlmostEqual(getattr(self.player, axis) - start, expected, delta=0.03)
-        self.player.position = Vec3(-8, 0, -8)
+        self.player.position = Vec3(0, 0, -8)
         held_keys["shift"] = 1
         self.move("w", seconds=0.2)
         self.assertAlmostEqual(self.player.z, -6.4, delta=0.03)
@@ -122,17 +124,17 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(self.player.camera_pivot.rotation_x, -90)
 
     def test_player_collisions_at_slow_frame_rate_and_corners(self):
-        self.player.position = Vec3(-1.2, 0, -9)
+        self.player.position = Vec3(0.8, 0, -9)
         self.player.rotation_y = 90
         held_keys["shift"] = 1
         self.move("w", seconds=1.5, dt=0.25)
-        self.assertLessEqual(self.player.x, -0.65)
+        self.assertLessEqual(self.player.x, 1.4)
         self.assertAlmostEqual(self.player.y, 0, delta=0.01)
-        self.player.position = Vec3(-14, 0, -14)
+        self.player.position = Vec3(-17, 0, -17)
         self.player.rotation_y = -135
         self.move("w", seconds=1.5, dt=0.25)
-        self.assertGreater(self.player.x, -14.7)
-        self.assertGreater(self.player.z, -14.7)
+        self.assertGreater(self.player.x, -17.7)
+        self.assertGreater(self.player.z, -17.7)
 
     def test_flashlight_pickup_toggle_drain_and_depletion(self):
         self.player.input("f")
@@ -165,7 +167,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_battery_and_key_pickups_with_real_rays(self):
         battery = self.pickup(BatteryPickup)
-        self.player.position = Vec3(-10, 0, 7)
+        self.player.position = Vec3(*self.house.level.spawns["pickups"][1]["approach"])
         self.player.stats.battery = 10
         self.aim(battery.world_position)
         self.assertIs(get_interaction_hit(self.player).entity, battery)
@@ -174,7 +176,7 @@ class PrototypeTests(unittest.TestCase):
         self.player.add_battery(1000)
         self.assertEqual(self.player.stats.battery, MAX_BATTERY)
         key = self.pickup(KeyPickup)
-        self.player.position = Vec3(10, 0, -11)
+        self.player.position = Vec3(*self.house.level.spawns["pickups"][2]["approach"])
         self.aim(key.world_position)
         self.assertIs(get_interaction_hit(self.player).entity, key)
         self.player.input("e")
@@ -183,12 +185,12 @@ class PrototypeTests(unittest.TestCase):
 
     def test_wall_blocks_interaction_and_exit_requires_crossing(self):
         key = self.pickup(KeyPickup)
-        self.player.position = Vec3(-1, 0, -9)
+        self.player.position = Vec3(1, 0, -9)
         self.aim(key.world_position)
         self.assertIsNot(get_interaction_hit(self.player).entity, key)
         door = self.house.exit_door
-        self.player.position = Vec3(10, 0, 13)
-        self.aim(Vec3(10, 1.5, 14.75))
+        self.player.position = Vec3(0, 0, 16.3)
+        self.aim(Vec3(0, 1.5, 17.8))
         self.assertIs(get_interaction_hit(self.player).entity, door)
         self.player.input("e")
         self.assertFalse(door.opened)
@@ -196,9 +198,9 @@ class PrototypeTests(unittest.TestCase):
         self.player.rotation_y = 0
         camera.rotation = Vec3(0, 0, 0)
         self.move("w", seconds=0.5)
-        self.assertLess(self.player.z, 14.2)
+        self.assertLess(self.player.z, 17.4)
         self.player.inventory.add_key("exit_key")
-        self.aim(Vec3(10, 1.5, 14.75))
+        self.aim(Vec3(0, 1.5, 17.8))
         self.player.input("e")
         self.assertTrue(door.opening)
         self.assertFalse(door.opened)
@@ -220,26 +222,32 @@ class PrototypeTests(unittest.TestCase):
         self.capture("render_escape.png")
 
     def test_astar_and_all_house_edges_have_clearance(self):
-        route = astar(0, 7, self.house.nav_nodes, self.house.graph)
-        self.assertEqual(route, [1, 2, 5, 6, 7])
-        self.assertEqual(astar(0, 0, self.house.nav_nodes, self.house.graph), [])
-        self.assertEqual(astar(0, 7, self.house.nav_nodes, {}), [])
-        self.assertEqual(astar(0, 99, self.house.nav_nodes, self.house.graph), [])
+        route = astar("foyer", "bedroom_two", self.house.nav_nodes, self.house.graph)
+        self.assertTrue(route)
+        self.assertEqual(route[-1], "bedroom_two")
+        previous = "foyer"
+        for node in route:
+            self.assertIn(node, self.house.graph[previous])
+            previous = node
+        self.assertEqual(astar("foyer", "foyer", self.house.nav_nodes, self.house.graph), [])
+        self.assertEqual(astar("foyer", "bedroom_two", self.house.nav_nodes, {}), [])
+        self.assertEqual(astar("foyer", "missing", self.house.nav_nodes, self.house.graph), [])
         nav = self.ghost.ai.navigation
         for node, neighbors in self.house.graph.items():
             for other in neighbors:
-                self.assertTrue(nav.segment_clear(self.house.nav_nodes[node], self.house.nav_nodes[other]),
-                                f"Blocked edge {node} -> {other}")
+                with self.subTest(edge=(node, other)):
+                    self.assertTrue(nav.segment_clear(self.house.nav_nodes[node], self.house.nav_nodes[other]),
+                                    f"Blocked edge {node} -> {other}")
 
     def test_ghost_rejoins_waypoints_and_sweeps_walls(self):
         nav = self.ghost.ai.navigation
-        self.ghost.position = Vec3(-1, 0, -9)
-        self.assertFalse(nav.segment_clear(self.ghost.position, Vec3(1, 0, -9)))
+        self.ghost.position = Vec3(1, 0, -9)
+        self.assertFalse(nav.segment_clear(self.ghost.position, Vec3(3, 0, -9)))
         for _ in range(30):
             time.dt = 0.25
-            nav.move_toward(Vec3(1, 0, -9), 20)
-        self.assertLess(self.ghost.x, -0.6)
-        nav.set_path_to_node(4)
+            nav.move_toward(Vec3(3, 0, -9), 20)
+        self.assertLess(self.ghost.x, 1.4)
+        nav.set_path_to_node("bedroom_one")
         self.assertFalse(nav.blocked)
         self.assertTrue(nav.path)
         time.dt = 1 / 30
@@ -250,30 +258,30 @@ class PrototypeTests(unittest.TestCase):
             nav.follow_path(4.2)
             self.assertTrue(nav.segment_clear(old, self.ghost.world_position))
         self.assertTrue(nav.path_finished())
-        self.assertLess((self.ghost.position - self.house.nav_nodes[4]).length(), 0.1)
+        self.assertLess((self.ghost.position - self.house.nav_nodes["bedroom_one"]).length(), 0.1)
 
     def test_real_ghost_vision_and_no_catch_through_wall(self):
-        self.ghost.position = Vec3(-1, 0, -9)
+        self.ghost.position = Vec3(1, 0, -9)
         self.ghost.rotation_y = 90
-        self.player.position = Vec3(0.8, 0, -9)
+        self.player.position = Vec3(2.8, 0, -9)
         self.assertFalse(can_see_player(self.ghost, self.player))
         self.assertFalse(has_line_of_sight(self.ghost, self.player))
         self.ghost.ai.state = GhostState.CHASE
         self.ghost.ai.update()
         self.assertEqual(self.manager.state, "playing")
-        self.ghost.position = Vec3(-0.65, 0, -9)
-        self.player.position = Vec3(0.55, 0, -9)
+        self.ghost.position = Vec3(1.4, 0, -9)
+        self.player.position = Vec3(2.55, 0, -9)
         self.ghost.ai.update()
         self.assertEqual(self.manager.state, "playing")
-        self.player.position = Vec3(-2, 0, -9)
+        self.player.position = Vec3(0, 0, -9)
         self.ghost.rotation_y = -90
         self.assertTrue(can_see_player(self.ghost, self.player))
         self.ghost.rotation_y = 90
         self.assertFalse(can_see_player(self.ghost, self.player))
 
     def test_hearing_and_frequent_investigate_replans_make_progress(self):
-        self.ghost.position = Vec3(-2, 0, -9)
-        self.player.position = Vec3(2, 0, -9)
+        self.ghost.position = Vec3(1, 0, -9)
+        self.player.position = Vec3(3, 0, -9)
         self.player.stats.noise_level = 0
         self.assertFalse(can_hear_player(self.ghost, self.player))
         self.player.stats.noise_level = 8
@@ -331,27 +339,27 @@ class PrototypeTests(unittest.TestCase):
         for fps in (4, 30, 60, 120):
             for sprinting, speed, noise in ((False, 5, 3), (True, 8, 8)):
                 with self.subTest(fps=fps, sprinting=sprinting):
-                    self.player.position = Vec3(-10, 0, -10)
+                    self.player.position = Vec3(0, 0, -10)
                     self.player.rotation_y = 0
                     held_keys["shift"] = int(sprinting)
                     self.move("w", seconds=1, dt=1 / fps)
                     self.assertAlmostEqual(self.player.z, -10 + speed, delta=0.002)
                     self.assertAlmostEqual(self.player.stats.noise_level, noise, delta=0.002)
-                    self.player.position = Vec3(-0.68, 0, -9)
+                    self.player.position = Vec3(1.4, 0, -9)
                     self.player.rotation_y = 90
                     self.move("w", seconds=1, dt=1 / fps)
-                    self.assertAlmostEqual(self.player.x, -0.68, delta=0.001)
+                    self.assertAlmostEqual(self.player.x, 1.4, delta=0.001)
                     self.assertEqual(self.player.stats.noise_level, 0)
-                    self.player.position = Vec3(-1.5, 0, -9)
+                    self.player.position = Vec3(0.5, 0, -9)
                     self.move("w", seconds=1, dt=1 / fps)
-                    # Wall face -0.2 minus the player's 0.325 half-width.
-                    self.assertLessEqual(self.player.x, -0.525)
+                    # Wall face 1.85 minus the player's 0.325 half-width.
+                    self.assertLessEqual(self.player.x, 1.525)
                     self.assertAlmostEqual(self.player.y, 0, delta=0.001)
-                    self.player.position = Vec3(-14, 0, -14)
+                    self.player.position = Vec3(-17, 0, -17)
                     self.player.rotation_y = -135
                     self.move("w", seconds=1, dt=1 / fps)
-                    self.assertGreater(self.player.x, -14.34)
-                    self.assertGreater(self.player.z, -14.34)
+                    self.assertGreater(self.player.x, -17.5)
+                    self.assertGreater(self.player.z, -17.5)
         held_keys.clear()
         held_keys["w"] = held_keys["s"] = held_keys["shift"] = 1
         self.player.update()
@@ -382,7 +390,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_full_charge_battery_remains_until_successful_interaction(self):
         pickup = self.pickup(BatteryPickup)
-        self.player.position = Vec3(-10, 0, 7)
+        self.player.position = Vec3(*self.house.level.spawns["pickups"][1]["approach"])
         self.aim(pickup.world_position)
         self.player.stats.battery = MAX_BATTERY
         self.player.input("e")
@@ -396,10 +404,10 @@ class PrototypeTests(unittest.TestCase):
 
     def test_door_blocks_player_and_ghost_until_animation_completes(self):
         door = self.house.exit_door
-        self.player.position = Vec3(10, 0, 13)
+        self.player.position = Vec3(0, 0, 16.3)
         self.player.rotation_y = 0
         self.player.inventory.add_key("exit_key")
-        self.ghost.position = Vec3(10, 0, 13)
+        self.ghost.position = Vec3(0, 0, 16.3)
         door.interact(self.player)
         blocker = door.doorway_blocker
         for frame in range(7):
@@ -410,15 +418,15 @@ class PrototypeTests(unittest.TestCase):
             self.assertEqual(door.opening_time, elapsed)
             self.assertIs(door.doorway_blocker, blocker)
             self.assertFalse(door.opened)
-            self.assertFalse(self.ghost.ai.navigation.segment_clear(Vec3(10, 0, 13), Vec3(10, 0, 16)))
+            self.assertFalse(self.ghost.ai.navigation.segment_clear(Vec3(0, 0, 16.3), Vec3(0, 0, 19)))
             self.move("w", seconds=0.1, dt=0.1)
-            self.assertLess(self.player.z, 14.2)
+            self.assertLess(self.player.z, 17.4)
         time.dt = 0.1
         door.update()
         self.assertTrue(door.opened)
         self.assertIsNone(door.collider)
         self.assertNotIn(blocker, scene.collidables)
-        self.assertTrue(self.ghost.ai.navigation.segment_clear(Vec3(10, 0, 13), Vec3(10, 0, 16)))
+        self.assertTrue(self.ghost.ai.navigation.segment_clear(Vec3(0, 0, 16.3), Vec3(0, 0, 19)))
 
     def test_navigation_replans_an_alternate_valid_route(self):
         # Isolated test geometry inside a clear quadrant; the existing house
@@ -586,7 +594,7 @@ class PrototypeTests(unittest.TestCase):
 
     def test_render_visibility_colors_and_flashlight_changes_pixels(self):
         self.capture("render_spawn.png")
-        self.player.position = Vec3(-3, 0, -9)
+        self.player.position = Vec3(1, 0, -9)
         self.player.rotation_y = 90
         self.player.camera_pivot.rotation_x = 15
         self.player.obtain_flashlight()
@@ -601,7 +609,8 @@ class PrototypeTests(unittest.TestCase):
         self.assertGreater(on_mean, off_mean + 5, "Flashlight has no visible effect")
         self.player.toggle_flashlight()
         camera.world_parent = scene
-        camera.position = Vec3(0, 28, -22)
+        self.house.ceiling.visible = False
+        camera.position = Vec3(0, 42, -32)
         camera.rotation = Vec3(0, 0, 0)
         camera.look_at(Vec3(0, 0, 0))
         overview = self.capture("render_overview.png")
@@ -610,6 +619,153 @@ class PrototypeTests(unittest.TestCase):
         self.assertGreater(sum(r > g * 1.5 and r > b * 1.5 and r > 30 for r, g, b in pixels), 50)
         self.assertGreater(sum(g > r * 1.5 and g > b * 1.5 and g > 30 for r, g, b in pixels), 50)
         self.assertLess(sum(min(rgb) > 245 for rgb in pixels) / len(pixels), 0.05)
+
+    def walk_to(self, point):
+        """Drive the actual controller with simulated W input; never teleport."""
+        point = Vec3(*point)
+        held_keys.clear()
+        camera.rotation = Vec3(0, 0, 0)
+        self.player.camera_pivot.rotation_x = 0
+        try:
+            for _ in range(1200):
+                delta = Vec3(point.x - self.player.x, 0, point.z - self.player.z)
+                if delta.length() < 0.025:
+                    return
+                self.player.rotation_y = math.degrees(math.atan2(delta.x, delta.z))
+                time.dt = min(1 / 30, delta.length() / 5)
+                before = Vec3(self.player.position)
+                held_keys["w"] = 1
+                self.player.update()
+                self.assertGreater((self.player.position - before).length(), 0.000001,
+                                   f"Player blocked en route to {point} at {before}")
+                self.assertAlmostEqual(self.player.y, 0, delta=0.01)
+            self.fail(f"Player failed to reach {point}")
+        finally:
+            held_keys.clear()
+
+    def walk_route(self, start, target):
+        self.walk_to(self.house.nav_nodes[start])
+        route = astar(start, target, self.house.nav_nodes, self.house.graph)
+        self.assertTrue(start == target or route, f"No route {start} -> {target}")
+        for node in route:
+            self.walk_to(self.house.nav_nodes[node])
+
+    def test_house_player_walks_to_every_room_without_teleporting(self):
+        previous = "foyer"
+        for room_id in self.house.rooms:
+            with self.subTest(room=room_id):
+                self.walk_route(previous, room_id)
+                self.assertEqual(self.house.room_at(self.player.position).room_id, room_id)
+                previous = room_id
+
+    def test_house_all_room_pairs_have_valid_astar_routes(self):
+        for start in self.house.rooms:
+            for target in self.house.rooms:
+                with self.subTest(route=(start, target)):
+                    path = astar(start, target, self.house.nav_nodes, self.house.graph)
+                    if start != target:
+                        self.assertTrue(path)
+                        self.assertEqual(path[-1], target)
+
+    def test_house_spawns_are_grounded_and_clear_of_colliders(self):
+        for point in (self.house.player_spawn, self.house.ghost_spawn, *self.house.nav_nodes.values()):
+            with self.subTest(point=point):
+                floor = world_raycast(point + Vec3(0, 0.1, 0), (0, -1, 0), distance=0.2,
+                                      traverse_target=self.house)
+                self.assertTrue(floor.hit)
+                self.assertAlmostEqual(floor.world_point.y, 0, delta=0.001)
+                for direction in ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)):
+                    self.assertFalse(world_raycast(point + Vec3(0, 1, 0), direction, distance=0.43,
+                                                   traverse_target=self.house).hit)
+
+    def test_house_player_collects_objectives_and_escapes_without_basement(self):
+        current = "foyer"
+        for spawn in self.house.level.spawns["pickups"]:
+            self.walk_route(current, spawn["room"])
+            self.walk_to(spawn["approach"])
+            pickup = self.house.pickups[spawn["id"]]
+            self.aim(pickup.world_position)
+            self.assertIs(get_interaction_hit(self.player).entity, pickup)
+            self.player.input("e")
+            self.assertNotIn(pickup, scene.collidables)
+            self.walk_to(self.house.nav_nodes[spawn["room"]])
+            current = spawn["room"]
+        self.assertTrue(self.player.has_flashlight)
+        self.assertTrue(self.player.inventory.has_key("exit_key"))
+        self.walk_route(current, "exit_approach")
+        self.aim(Vec3(0, 1.5, 17.8))
+        self.player.input("e")
+        for _ in range(4):
+            time.dt = 0.25
+            self.house.exit_door.update()
+        self.assertTrue(self.house.exit_door.opened)
+        self.player.rotation_y = 0
+        self.player.camera_pivot.rotation_x = 0
+        camera.rotation = Vec3(0, 0, 0)
+        for _ in range(30):
+            time.dt = 1 / 30
+            held_keys["w"] = 1
+            self.player.update()
+            self.house.exit_door.update()
+            if self.manager.state == "escaped":
+                break
+        held_keys.clear()
+        self.assertEqual(self.manager.state, "escaped")
+        self.assertFalse(self.house.basement_door.opened)
+
+    def test_house_basement_is_locked_and_blocks_player_and_ghost(self):
+        self.player.position = Vec3(14, 0, -6)
+        self.aim(Vec3(15.6, 1.5, -6))
+        self.assertIs(get_interaction_hit(self.player).entity, self.house.basement_door)
+        self.player.input("e")
+        self.assertIn("future milestone", self.manager.hud.message.text)
+        self.player.rotation_y = 90
+        self.move("w", seconds=1)
+        self.assertLess(self.player.x, 15.2)
+        self.assertFalse(self.house.basement_door.opening)
+        self.assertFalse(self.ghost.ai.navigation.segment_clear(Vec3(14, 0, -6), Vec3(17, 0, -6)))
+
+    def test_house_perimeter_has_no_unintended_openings(self):
+        ignore = [prop for room in self.house.rooms.values() for prop in room.props]
+        for height in (0.5, 1.55):
+            for step in range(71):
+                offset = -17.5 + step * 0.5
+                for start, direction in ((Vec3(-17.3, height, offset), (-1, 0, 0)),
+                                         (Vec3(17.3, height, offset), (1, 0, 0)),
+                                         (Vec3(offset, height, -17.3), (0, 0, -1)),
+                                         (Vec3(offset, height, 17.3), (0, 0, 1))):
+                    hit = world_raycast(start, direction, distance=1, traverse_target=self.house, ignore=ignore)
+                    self.assertTrue(hit.hit, f"Perimeter gap at {start}")
+                    self.assertIn(hit.entity, [*self.house.walls, *self.house.door_frames, self.house.exit_door])
+
+    def test_house_all_doorways_have_player_and_ghost_clearance(self):
+        nav = self.ghost.ai.navigation
+        for door in self.house.level.house["connections"]:
+            with self.subTest(doorway=door["id"]):
+                center = (Vec3(door["line"], 0, door["at"]) if door["axis"] == "x"
+                          else Vec3(door["at"], 0, door["line"]))
+                direction = Vec3(1, 0, 0) if door["axis"] == "x" else Vec3(0, 0, 1)
+                self.assertTrue(nav.segment_clear(center - direction, center + direction))
+                self.player.position = center - direction
+                self.walk_to(center + direction)
+
+    def test_house_ghost_replans_around_a_blocked_real_doorway(self):
+        self.ghost.position = self.house.nav_nodes["living"]
+        ai = self.ghost.ai
+        ai.state = GhostState.PATROL
+        self.assertTrue(ai.navigation.set_path_to_node("storage"))
+        Entity(parent=self.house, model="cube", collider="box",
+               position=(-10, 1.6, -6), scale=(0.5, 3.2, 3.5))
+        with patch("game.ghost.ghost_ai.can_see_player", return_value=False), \
+                patch("game.ghost.ghost_ai.can_hear_player", return_value=False):
+            for _ in range(1500):
+                time.dt = 1 / 30
+                before = Vec3(self.ghost.position)
+                ai.update()
+                self.assertTrue(ai.navigation.segment_clear(before, self.ghost.position))
+                if (self.ghost.position - self.house.nav_nodes["storage"]).length() < 0.1:
+                    break
+        self.assertLess((self.ghost.position - self.house.nav_nodes["storage"]).length(), 0.1)
 
 
 if __name__ == "__main__":

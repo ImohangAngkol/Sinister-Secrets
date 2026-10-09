@@ -1,3 +1,68 @@
 {
-  "note": "Prototype currently defines spawn points in game/world/house.py"
+  "schema_version": 1,
+  "player": {
+    "room": "foyer",
+    "position": [
+      0,
+      0,
+      -16
+    ],
+    "rotation_y": 124,
+    "camera_pitch": 27
+  },
+  "ghost": {
+    "room": "kitchen",
+    "position": [
+      -14,
+      0,
+      6
+    ]
+  },
+  "pickups": [
+    {
+      "id": "foyer_flashlight",
+      "item": "flashlight",
+      "room": "foyer",
+      "position": [
+        1.5,
+        0.91,
+        -17
+      ],
+      "approach": [
+        0,
+        0,
+        -16
+      ]
+    },
+    {
+      "id": "kitchen_battery",
+      "item": "battery",
+      "room": "kitchen",
+      "position": [
+        -16.6,
+        1.2,
+        5
+      ],
+      "approach": [
+        -15,
+        0,
+        5
+      ]
+    },
+    {
+      "id": "bedroom_exit_key",
+      "item": "exit_key",
+      "room": "bedroom_two",
+      "position": [
+        8.7,
+        0.9,
+        9
+      ],
+      "approach": [
+        7.2,
+        0,
+        9
+      ]
+    }
+  ]
 }

@@ -4,7 +4,10 @@ Run from the project root: .venv/Scripts/python.exe -m game.tests.windowed_smoke
 This opens, resizes and closes a native window, saving render_*.png evidence.
 """
 from pathlib import Path
+import math
 import runpy
+import statistics
+import time as wall_clock
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import Filename, WindowProperties, loadPrcFileData
@@ -13,7 +16,7 @@ loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 
 
 def verify_window(app):
-    from ursina import application, held_keys, mouse, scene
+    from ursina import Vec3, application, camera, held_keys, mouse, scene
     from game.game_manager import GameManager
 
     manager = next(entity for entity in scene.entities if isinstance(entity, GameManager))
@@ -32,6 +35,13 @@ def verify_window(app):
         assert manager.state == "playing"
         assert mouse.locked
         capture("render_windowed.png")
+        costs = []
+        for _ in range(120):
+            before = wall_clock.perf_counter()
+            app.taskMgr.step()
+            costs.append((wall_clock.perf_counter() - before) * 1000)
+        print(f"FRAME_TIMING: median={statistics.median(costs):.2f}ms "
+              f"p95={sorted(costs)[113]:.2f}ms (native scripted run, not a laptop benchmark)")
         for width, height in ((640, 480), (960, 720), (1280, 720)):
             properties = WindowProperties()
             properties.set_size(width, height)
@@ -77,6 +87,29 @@ def verify_window(app):
             assert manager.scene_manager.player.enabled and mouse.locked
             assert manager.scene_manager.player.inventory.key_count() == 0
         print("WINDOWED_SMOKE_OK: native resize, six scripted R restarts, mouse capture, screenshots")
+
+        # Capture the data-authored room views through the actual main entry
+        # point. Pose the developer camera and freeze gameplay only for these
+        # images; this is visual verification, not a claimed human playthrough.
+        house = manager.scene_manager.house
+        manager.scene_manager.player.enabled = False
+        manager.scene_manager.ghost.enabled = False
+        mouse.locked = False
+        manager.hud.set_prompt("")
+        camera.world_parent = scene
+        for name, view in house.level.house["views"].items():
+            house.ceiling.visible = name != "overview"
+            camera.position = Vec3(*view["position"])
+            direction = Vec3(*view["target"]) - camera.position
+            camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
+                                   math.degrees(math.atan2(direction.x, direction.z)), 0)
+            room_id = "bedroom_two" if name == "bedroom" else name
+            manager.hud.show_message("House layout" if name == "overview" else house.rooms[room_id].title)
+            frames(4)
+            capture(f"render_house_{name}.png")
+        print(f"HOUSE_VIEWS_OK: {len(house.rooms)} areas, {len(house.nav_nodes)} nodes, "
+              f"{len(house.level.navigation['edges'])} edges, "
+              f"{len(scene.collidables)} colliders, six authored screenshots")
     finally:
         app.destroy()
 

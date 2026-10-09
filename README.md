@@ -35,9 +35,10 @@ With the existing Windows virtual environment:
 .\.venv\Scripts\python.exe main.py
 ```
 
-The white pickup near spawn is the flashlight, the blue pickup is a battery,
-and the yellow pickup is the exit key. Unlock the brown north exit with E,
-then walk through the opening to escape. The ghost uses placeholder geometry.
+The white pickup on the foyer console is the flashlight, the blue pickup on the
+kitchen counter is a battery, and the yellow pickup on the Bedroom Two bedside
+table is the exit key. Unlock the brown north exit with E, then walk through
+the opening to escape. The ghost uses placeholder geometry.
 
 ## Rendering and gameplay fixes
 
@@ -87,9 +88,13 @@ ignored by Git. Review `render_spawn.png`, `render_overview.png`,
 and `render_caught.png`. The initial verification also captured a real windowed
 launch as `render_windowed.png`.
 
-Baseline `f1a6f2c` passed its original 13 tests before Milestone 1 changes. The
-current suite passes **25 tests**: those 13 cases plus 12 regression cases. The
-original exit test now waits for the opening animation before expecting clearance.
+Baseline `f1a6f2c` passed its original 13 tests before Milestone 1 changes.
+Milestone 2 started from clean `main` commit `c49e6eb`, with all 25 Milestone 1
+tests passing. The current suite passes **39 tests**: those 25 cases plus 14
+house/data checks. Map-dependent test coordinates and waypoint IDs were adapted
+to the authored layout; the original movement, interaction, collision, state,
+flicker and restart assertions remain. The original exit test waits for the
+opening animation before expecting clearance.
 Walking (5 units/s), sprinting (8 units/s), blocked-wall noise, corners, ghost
 movement budgets, door timing, and flashlight drain/flicker are exercised with
 simulated timesteps at 4, 30, 60, and 120 FPS. Movement assertions use real
@@ -101,6 +106,8 @@ scripted R restarts after alternating win/loss callbacks. The offscreen suite al
 checks 12 restarts, including disposal during an opening door, stable entity,
 collider, timer and light counts, and reset inventory. Native screenshots at all
 three sizes and both end screens were reviewed along with the flashlight images.
+The extended harness also captures six authored house views, using a posed
+developer camera and hiding only the ceiling for the elevated overview.
 
 These are scripted engine tests, not human keyboard/mouse playthroughs. Windows
 refused the harness's request to lose foreground focus; the pause/release/resume
@@ -153,6 +160,89 @@ Milestone 1 files changed (existing folders preserved):
 | HUD | `game/ui/hud.py`, `game/ui/game_over.py` |
 | Verification/documentation | `game/tests/test_prototype.py`, new `game/tests/windowed_smoke.py`, `README.md` |
 
+## Milestone 2: authored haunted house
+
+The fixed 36 x 36 unit house has 15 areas, 25 internal doorways, a four-unit-wide
+central hallway, and three-unit-wide openings. Walls, floor tiles, furniture and
+the ceiling use built-in geometry, normalized colors and existing lighting.
+Room labels, different muted floor tones and geometric furniture provide
+landmarks without imported textures, models, images or audio.
+
+| Location | Areas and landmarks |
+| --- | --- |
+| South/front | Entrance foyer with flashlight console and red bench; west/east front passages |
+| Centre | Main hallway with tall clock; living room with red sofa/table; Bedroom One with blue bed/wardrobe |
+| West wing | Dining room with table/chairs; kitchen with counters/cabinets/battery; storage with shelves/boxes |
+| East/north wing | Bedroom Two with plum bed/bedside exit key; bathroom with bath/sink |
+| East/south wing | Basement vestibule; locked alcove with placeholder steps, reserved for a future milestone |
+| North/rear | West/east rear passages and exit area with the functional keyed exit |
+
+Two example evasion loops are:
+
+- Foyer -> west front passage -> storage -> kitchen -> dining -> main hall -> foyer.
+- Main hall -> Bedroom One -> basement vestibule -> east front passage -> foyer -> main hall.
+
+Rear passages add more routes through the exit area. The basement's inner door
+is sealed; the vestibule remains accessible, and completion never needs a
+basement key. Interior room connections are open framed doorways. There is no
+interior door-opening AI or advanced perception in this milestone.
+
+The existing loader `game/levels/haunted_house.py` now reads and validates the
+existing JSON files. House data defines rooms, furniture, connections and camera
+views; navigation data defines 43 waypoints, 53 bidirectional edges and room
+patrol destinations; spawn/door data defines player, ghost, pickups and locks.
+Item restoration values still come from `game/data/items.json`. Wall segments
+are derived from the authored room rectangles, merging shared edges and removing
+only declared openings. Nothing is randomized except existing ghost patrol choice.
+
+New validation confirms:
+
+- Every area is reachable, and removing any single room connection still leaves
+  every area connected; no single doorway is a mandatory choke point.
+- All 225 ordered room pairs have A* routes. Every waypoint edge has real ghost
+  clearance, and every internal doorway accepts actual controller movement.
+- Spawn and waypoint positions have floor support and no immediate obstruction.
+- 568 perimeter rays find collision barriers, including the closed exit seams.
+- A simulated player walks to all 15 room centres without teleporting, then a
+  separate controller-driven run collects the flashlight, battery and key and
+  crosses the exit, without opening the basement.
+- Blocking the real living/storage doorway after planning makes the ghost
+  replan through the house loop and reach storage without penetrating geometry.
+
+The native scripted performance sample on this machine measured approximately
+8 ms median and 14 ms p95 per task-manager frame, with 103 colliders. This is a
+short development sample, not a benchmark for ordinary laptops. Geometry has
+one bounding collider per furniture assembly; decorative pieces do not each
+add a collider. Lower-end GPU performance and longer sessions need manual testing.
+
+Run the windowed smoke command above to regenerate these ignored screenshots:
+
+| View | Screenshot |
+| --- | --- |
+| Entrance foyer | `game/tests/render_house_foyer.png` |
+| Main hallway | `game/tests/render_house_main_hall.png` |
+| Living room | `game/tests/render_house_living.png` |
+| Kitchen | `game/tests/render_house_kitchen.png` |
+| Bedroom Two | `game/tests/render_house_bedroom.png` |
+| Elevated layout | `game/tests/render_house_overview.png` |
+
+Milestone 2 files changed:
+
+| Area | Files |
+| --- | --- |
+| Level/loading | `game/levels/haunted_house.py`, `game/levels/haunted_house.json`, `game/levels/navigation.json` |
+| Spawn/doors | `game/data/spawn_points.json`, `game/data/doors.json` |
+| World | `game/world/house.py`, `game/world/room.py`, `game/world/waypoint.py` |
+| Scene/patrol destinations | `game/scene_manager.py`, `game/ghost/ghost.py`, `game/ghost/ghost_ai.py` |
+| Verification | `game/tests/test_prototype.py`, `game/tests/windowed_smoke.py`, new `game/tests/test_level_data.py` |
+| Documentation | `README.md` |
+
+No unresolved failure remains in the tested scenarios. Human evasion/balance,
+real Alt+Tab, prolonged sessions and other hardware remain unverified. Labels
+and furniture are development placeholders; the overview intentionally removes
+the ceiling visually. No puzzle, save, advanced inventory or audio implementation
+was added, and no commits, merges or pushes were performed.
+
 ## Manual verification
 
 From PowerShell:
@@ -169,9 +259,11 @@ Set-Location 'C:\Users\User\Desktop\Sinister_Secrets'
 2. Aim at the white flashlight near spawn and press E. Toggle F; confirm the
    beam follows the camera, switching off stops drain, and switching on resumes
    it. Below 15%, observe flicker; at 0%, confirm the light turns off.
-3. Reach the blue battery in the northwest room via the central opening. Use E
-   while below 100%; charge increases by up to 35 points and the pickup vanishes.
-4. Collect the yellow key in the southeast room. Before collection, E on the
+3. Reach the kitchen via living -> storage -> kitchen, or main hall -> dining ->
+   kitchen. Use E on the blue counter battery while below 100%; charge increases
+   by up to 35 points and the pickup vanishes.
+4. Collect the yellow key on Bedroom Two's bedside table in the northeast inner
+   wing, reached through the main hall or the east passages. Before collection, E on the
    brown north exit reports locked. After collection, repeatedly press E during
    opening and walk against the door: the animation must continue and the
    doorway stay blocked until it finishes. Walk through to win.
@@ -184,6 +276,11 @@ Set-Location 'C:\Users\User\Desktop\Sinister_Secrets'
    playing and cursor release on win/loss screens.
 7. Resize to 640x480, 960x720, and 1280x720 while playing and on end screens.
    Confirm inventory, ghost state, prompts and messages stay readable.
+8. Walk both example loops above. Turn through successive doorways while being
+   chased; check that walls break sight and the ghost follows reachable routes.
+   Visit the storage, both bedrooms and bathroom; walk around furniture and
+   inspect wall corners for snagging. Try E on the basement door: it must remain
+   sealed and must not affect escape through the north exit.
 
 For a full-charge pickup check without the ghost interrupting, launch this
 temporary test setup (it does not change the saved game code):
@@ -207,19 +304,19 @@ the numerical speed and flicker comparisons. Dynamic blockage and alternate
 route recovery are reproduced by the regression suite's temporary colliders;
 the current level has no movable-obstacle gameplay mechanic.
 
-## Development roadmap after this milestone
+## Recommendations for Milestone 3
 
-1. Complete human playtesting and a longer restart/focus soak; profile movement
-   substeps and raycasts before increasing level complexity.
-2. Improve ghost memory, reachable search locations, retry priorities, and
-   reactions to changing doors, with deterministic navigation regressions.
-3. Build a placeholder house/maze exploration loop with readable landmarks,
-   safe spawns and complete navigation coverage; validate every passage width.
-4. Add small interconnected puzzles and item use, then inventory capacity,
-   inspection and persistence without allowing unwinnable progression.
-5. Tune hiding, resource pressure and paranormal events. Add audio/visual assets
-   only after authorization and stable gameplay, then menus, settings, saving,
-   accessibility and wider hardware testing.
+1. Human playtest the loops, flashlight economy, spawn safety and pursuit speed;
+   complete an Alt+Tab/restart soak and profile a lower-end student laptop.
+2. Make SEARCH visit reachable last-seen locations and nearby rooms; improve
+   short-term memory and investigation priorities with deterministic tests.
+3. Tune vision/hearing occlusion and reacquisition so alternate routes reward
+   movement and the ghost cannot use inaccessible target positions.
+4. Add intentional interior-door handling only with navigation/recovery tests;
+   keep rooms and pickups reachable if a door becomes blocked.
+5. After AI is stable, scope hiding and simple puzzles as separate work, then
+   inventory expansion and horror events. Imported assets, sound and saving
+   remain future work requiring authorization.
 
 Engine references: [Ursina color API](https://www.ursinaengine.org/api_reference_v8_0_0/color.html)
 and [Panda3D lighting](https://docs.panda3d.org/1.10/python/programming/render-attributes/lighting).

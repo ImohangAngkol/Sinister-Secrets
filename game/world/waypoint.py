@@ -5,5 +5,5 @@ from ursina import Vec3
 
 @dataclass(frozen=True)
 class Waypoint:
-    node_id: int
+    node_id: str
     position: Vec3

@@ -1,427 +1,101 @@
+"""Geometry builder for the fixed, data-authored haunted house."""
 from ursina import Entity, Vec3, color
 
 from game.items.battery import BatteryPickup
 from game.items.flashlight import FlashlightPickup
 from game.items.key import KeyPickup
-from game.settings import EXIT_KEY_ID
+from game.levels.haunted_house import load_level, room_connections, wall_segments
 from game.world.exit_door import ExitDoor
+from game.world.locked_door import LockedDoor
+from game.world.room import Room
+from game.world.waypoint import Waypoint
 
 
 class House(Entity):
-
     def __init__(self, on_escape):
         super().__init__()
-        # Panda's generated shader supports ambient, directional and spot lights.
         self.set_shader_auto()
-
-        # =====================================
-        # SPAWN LOCATIONS
-        # =====================================
-
-        self.player_spawn = Vec3(
-            -10,
-            1,
-            -10,
-        )
-
-        self.ghost_spawn = Vec3(
-            10,
-            0,
-            10,
-        )
-
-        self._build_house()
-
+        self.level = load_level()
+        data = self.level.house
+        self.room_graph = room_connections(data)
+        self.rooms = {room["id"]: Room(room, parent=self) for room in data["rooms"]}
+        self.player_spawn = Vec3(*self.level.spawns["player"]["position"])
+        self.ghost_spawn = Vec3(*self.level.spawns["ghost"]["position"])
+        self.walls = []
+        self.door_frames = []
+        self.pickups = {}
+        height, thickness = data["wall_height"], data["wall_thickness"]
+        for axis, line, low, high in wall_segments(data):
+            center, length = (low + high) / 2, high - low
+            position = (line, height / 2, center) if axis == "x" else (center, height / 2, line)
+            scale = (thickness, height, length) if axis == "x" else (length, height, thickness)
+            self.walls.append(self._wall(position, scale))
+        for definition in data["extra_walls"]:
+            self.walls.append(self._wall(definition["position"], definition["scale"]))
+        for opening in (*data["connections"], data["exit_opening"]):
+            self._door_frame(opening)
+        x0, z0, x1, z1 = data["bounds"]
+        self.ceiling = Entity(parent=self, model="cube", shader=None, collider="box",
+                              position=((x0 + x1) / 2, height + 0.1, (z0 + z1) / 2),
+                              scale=(x1 - x0, 0.2, z1 - z0), color=color.rgb32(73, 75, 80))
+        # A short landing keeps the exit crossing grounded before the win callback.
+        Entity(parent=self, model="cube", shader=None, collider="box",
+               position=(0, -0.15, 19.5), scale=(4, 0.3, 3), color=color.rgb32(60, 63, 66))
         self._build_navigation()
+        self._place_items(on_escape)
 
-        self._place_items(
-            on_escape
-        )
+    def _wall(self, position, scale):
+        return Entity(parent=self, model="cube", shader=None, collider="box",
+                      position=position, scale=scale, color=color.rgb32(110, 112, 119))
 
-    # =========================================
-    # WALL CREATOR
-    # =========================================
-
-    def _wall(
-        self,
-        position,
-        scale,
-    ):
-
-        return Entity(
-            parent=self,
-
-            model="cube",
-
-            position=position,
-
-            scale=scale,
-
-            shader=None,
-            color=color.rgb32(
-                125,
-                129,
-                138,
-            ),
-
-            collider="box",
-        )
-
-    # =========================================
-    # BUILD HOUSE
-    # =========================================
-
-    def _build_house(self):
-
-        # =====================================
-        # FLOOR
-        # =====================================
-
-        Entity(
-            parent=self,
-
-            model="cube",
-
-            position=(
-                0,
-                -0.15,
-                0,
-            ),
-
-            scale=(
-                30,
-                0.3,
-                30,
-            ),
-
-            shader=None,
-            color=color.rgb32(
-                60,
-                63,
-                69,
-            ),
-
-            collider="box",
-        )
-
-        # IMPORTANT:
-        #
-        # No ceiling yet.
-        #
-        # This makes debugging the prototype
-        # much easier.
-
-        # =====================================
-        # OUTSIDE WALLS
-        # =====================================
-
-        self._wall(
-            (-15, 1.5, 0),
-            (0.4, 3, 30),
-        )
-
-        self._wall(
-            (15, 1.5, 0),
-            (0.4, 3, 30),
-        )
-
-        self._wall(
-            (0, 1.5, -15),
-            (30, 3, 0.4),
-        )
-
-        # =====================================
-        # NORTH WALL
-        # =====================================
-        #
-        # Gap near the right side is
-        # where our exit door goes.
-
-        self._wall(
-            (-3.25, 1.5, 15),
-            (23.5, 3, 0.4),
-        )
-
-        self._wall(
-            (13.25, 1.5, 15),
-            (3.5, 3, 0.4),
-        )
-
-        # =====================================
-        # INTERIOR WALLS
-        # =====================================
-
-        # SOUTH VERTICAL WALL
-
-        self._wall(
-            (0, 1.5, -9),
-            (0.4, 3, 12),
-        )
-
-        # NORTH VERTICAL WALL
-
-        self._wall(
-            (0, 1.5, 9),
-            (0.4, 3, 12),
-        )
-
-        # WEST HORIZONTAL WALL
-
-        self._wall(
-            (-9, 1.5, 0),
-            (12, 3, 0.4),
-        )
-
-        # EAST HORIZONTAL WALL
-
-        self._wall(
-            (9, 1.5, 0),
-            (12, 3, 0.4),
-        )
-
-        # =====================================
-        # DEBUG LANDMARKS
-        # =====================================
-
-        # These are temporary cubes so you
-        # can understand where you are.
-
-        Entity(
-            parent=self,
-            model="cube",
-            position=(-12, 0.5, -12),
-            scale=(1, 1, 1),
-            color=color.red,
-            shader=None,
-            collider="box",
-        )
-
-        Entity(
-            parent=self,
-            model="cube",
-            position=(12, 0.5, 12),
-            scale=(1, 1, 1),
-            color=color.green,
-            shader=None,
-            collider="box",
-        )
-
-    # =========================================
-    # GHOST NAVIGATION
-    # =========================================
+    def _door_frame(self, opening):
+        axis, line, center, width = (opening[key] for key in ("axis", "line", "at", "width"))
+        for offset in (-width / 2 - 0.06, width / 2 + 0.06):
+            position = (line, 1.6, center + offset) if axis == "x" else (center + offset, 1.6, line)
+            scale = (0.38, 3.2, 0.18) if axis == "x" else (0.18, 3.2, 0.38)
+            # Exterior trim overlaps the door edge to seal collider seams.
+            # Interior frames share existing walls and need no extra collider.
+            self.door_frames.append(Entity(parent=self, model="cube", shader=None,
+                                           position=position, scale=scale,
+                                           collider="box" if "id" not in opening else None,
+                                           color=color.rgb32(77, 65, 57)))
+        position = (line, 3.06, center) if axis == "x" else (center, 3.06, line)
+        scale = (0.38, 0.28, width) if axis == "x" else (width, 0.28, 0.38)
+        self.door_frames.append(Entity(parent=self, model="cube", shader=None,
+                                       position=position, scale=scale, color=color.rgb32(77, 65, 57)))
 
     def _build_navigation(self):
+        # Preserve Panda3D Entity.nodes; level IDs live in nav_nodes.
+        self.waypoints = {node: Waypoint(node, Vec3(*position))
+                          for node, position in self.level.navigation["nodes"].items()}
+        self.nav_nodes = {node: waypoint.position for node, waypoint in self.waypoints.items()}
+        self.graph = {node: [] for node in self.nav_nodes}
+        for a, b in self.level.navigation["edges"]:
+            self.graph[a].append(b)
+            self.graph[b].append(a)
+        self.patrol_targets = tuple(self.level.navigation["patrol_targets"])
 
-        # DO NOT rename this to self.nodes.
-        #
-        # Panda3D already uses the name
-        # "nodes".
+    def _place_items(self, on_escape):
+        for spawn in self.level.spawns["pickups"]:
+            kind = spawn["item"]
+            args = {"parent": self, "position": spawn["position"]}
+            if kind == "flashlight":
+                item = FlashlightPickup(**args)
+            elif kind == "battery":
+                item = BatteryPickup(amount=self.level.items[kind]["restore"], **args)
+            else:
+                item = KeyPickup(key_id=kind, key_name="Exit Key", **args)
+            item.spawn_id = spawn["id"]
+            self.pickups[spawn["id"]] = item
+        exit_data, basement_data = self.level.doors["exit_door"], self.level.doors["basement_door"]
 
-        self.nav_nodes = {
+        def door_args(definition):
+            return {key: definition[key] for key in
+                    ("position", "scale", "rotation_y", "required_key", "locked_message")}
 
-            0: Vec3(
-                -10,
-                0,
-                -10,
-            ),
+        self.exit_door = ExitDoor(parent=self, on_escape=on_escape, **door_args(exit_data))
+        self.basement_door = LockedDoor(parent=self, **door_args(basement_data))
+        self.basement_door.interaction_text = "[E] Basement entrance (sealed)"
 
-            1: Vec3(
-                -4,
-                0,
-                -4,
-            ),
-
-            2: Vec3(
-                0,
-                0,
-                0,
-            ),
-
-            3: Vec3(
-                4,
-                0,
-                -4,
-            ),
-
-            4: Vec3(
-                10,
-                0,
-                -10,
-            ),
-
-            5: Vec3(
-                4,
-                0,
-                4,
-            ),
-
-            6: Vec3(
-                10,
-                0,
-                10,
-            ),
-
-            7: Vec3(
-                10,
-                0,
-                13,
-            ),
-
-            8: Vec3(
-                -4,
-                0,
-                4,
-            ),
-
-            9: Vec3(
-                -10,
-                0,
-                10,
-            ),
-        }
-
-        # =====================================
-        # CONNECTION GRAPH
-        # =====================================
-
-        self.graph = {
-
-            0: [1],
-
-            1: [
-                0,
-                2,
-            ],
-
-            2: [
-                1,
-                3,
-                5,
-                8,
-            ],
-
-            3: [
-                2,
-                4,
-            ],
-
-            4: [
-                3,
-            ],
-
-            5: [
-                2,
-                6,
-            ],
-
-            6: [
-                5,
-                7,
-            ],
-
-            7: [
-                6,
-            ],
-
-            8: [
-                2,
-                9,
-            ],
-
-            9: [
-                8,
-            ],
-        }
-
-    # =========================================
-    # ITEMS
-    # =========================================
-
-    def _place_items(
-        self,
-        on_escape,
-    ):
-
-        # =====================================
-        # FLASHLIGHT
-        # =====================================
-        #
-        # BRIGHT WHITE rectangular object
-        # close to spawn.
-
-        FlashlightPickup(
-            parent=self,
-
-            position=(
-                -8,
-                0.5,
-                -10,
-            ),
-        )
-
-        # =====================================
-        # BATTERY
-        # =====================================
-        #
-        # BLUE object.
-
-        BatteryPickup(
-            parent=self,
-
-            position=(
-                -10,
-                0.5,
-                9,
-            ),
-
-            amount=35,
-        )
-
-        # =====================================
-        # EXIT KEY
-        # =====================================
-        #
-        # YELLOW object.
-
-        KeyPickup(
-            parent=self,
-
-            position=(
-                10,
-                0.5,
-                -9,
-            ),
-
-            key_id=EXIT_KEY_ID,
-
-            key_name="Exit Key",
-        )
-
-        # =====================================
-        # EXIT DOOR
-        # =====================================
-
-        self.exit_door = ExitDoor(
-            parent=self,
-
-            position=(
-                8.5,
-                0,
-                14.75,
-            ),
-
-            scale=(
-                3.0,
-                3.0,
-                0.35,
-            ),
-
-            required_key=EXIT_KEY_ID,
-
-            locked_message=(
-                "The exit is locked. "
-                "Find the exit key."
-            ),
-
-            on_escape=on_escape,
-        )
+    def room_at(self, position):
+        return next((room for room in self.rooms.values() if room.contains(position)), None)

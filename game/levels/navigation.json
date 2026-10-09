@@ -1,3 +1,446 @@
 {
-  "status": "prototype_navigation_is_currently_in_game/world/house.py"
+  "schema_version": 1,
+  "nodes": {
+    "foyer": [
+      0,
+      0,
+      -15
+    ],
+    "main_hall": [
+      0,
+      0,
+      0
+    ],
+    "exit_area": [
+      0,
+      0,
+      15
+    ],
+    "living": [
+      -6,
+      0,
+      -6
+    ],
+    "dining": [
+      -6,
+      0,
+      6
+    ],
+    "kitchen": [
+      -14,
+      0,
+      6
+    ],
+    "storage": [
+      -14,
+      0,
+      -6
+    ],
+    "bedroom_one": [
+      6,
+      0,
+      -6
+    ],
+    "bedroom_two": [
+      6,
+      0,
+      6
+    ],
+    "bathroom": [
+      14,
+      0,
+      6
+    ],
+    "basement_entrance": [
+      14,
+      0,
+      -6
+    ],
+    "south_west": [
+      -12,
+      0,
+      -15
+    ],
+    "south_east": [
+      12,
+      0,
+      -15
+    ],
+    "north_west": [
+      -12,
+      0,
+      15
+    ],
+    "north_east": [
+      12,
+      0,
+      15
+    ],
+    "door_foyer_main_hall": [
+      0,
+      0,
+      -12
+    ],
+    "door_foyer_south_west": [
+      -6,
+      0,
+      -15
+    ],
+    "door_foyer_south_east": [
+      6,
+      0,
+      -15
+    ],
+    "door_main_hall_living": [
+      -2,
+      0,
+      -6
+    ],
+    "door_main_hall_dining": [
+      -2,
+      0,
+      6
+    ],
+    "door_main_hall_bedroom_one": [
+      2,
+      0,
+      -6
+    ],
+    "door_main_hall_bedroom_two": [
+      2,
+      0,
+      6
+    ],
+    "door_main_hall_exit_area": [
+      0,
+      0,
+      12
+    ],
+    "door_living_storage": [
+      -10,
+      0,
+      -6
+    ],
+    "door_living_dining": [
+      -6,
+      0,
+      0
+    ],
+    "door_dining_kitchen": [
+      -10,
+      0,
+      6
+    ],
+    "door_kitchen_storage": [
+      -14,
+      0,
+      0
+    ],
+    "door_storage_south_west": [
+      -14,
+      0,
+      -12
+    ],
+    "door_living_south_west": [
+      -8,
+      0,
+      -12
+    ],
+    "door_kitchen_north_west": [
+      -14,
+      0,
+      12
+    ],
+    "door_dining_north_west": [
+      -8,
+      0,
+      12
+    ],
+    "door_north_west_exit_area": [
+      -6,
+      0,
+      15
+    ],
+    "door_south_east_bedroom_one": [
+      8,
+      0,
+      -12
+    ],
+    "door_south_east_basement_entrance": [
+      14,
+      0,
+      -12
+    ],
+    "door_bedroom_one_basement_entrance": [
+      10,
+      0,
+      -6
+    ],
+    "door_bedroom_one_bedroom_two": [
+      6,
+      0,
+      0
+    ],
+    "door_bedroom_two_bathroom": [
+      10,
+      0,
+      6
+    ],
+    "door_bathroom_north_east": [
+      14,
+      0,
+      12
+    ],
+    "door_bedroom_two_north_east": [
+      8,
+      0,
+      12
+    ],
+    "door_north_east_exit_area": [
+      6,
+      0,
+      15
+    ],
+    "exit_approach": [
+      0,
+      0,
+      16.3
+    ],
+    "hall_south": [
+      0,
+      0,
+      -6
+    ],
+    "hall_north": [
+      0,
+      0,
+      6
+    ]
+  },
+  "edges": [
+    [
+      "foyer",
+      "door_foyer_main_hall"
+    ],
+    [
+      "door_foyer_main_hall",
+      "hall_south"
+    ],
+    [
+      "foyer",
+      "door_foyer_south_west"
+    ],
+    [
+      "door_foyer_south_west",
+      "south_west"
+    ],
+    [
+      "foyer",
+      "door_foyer_south_east"
+    ],
+    [
+      "door_foyer_south_east",
+      "south_east"
+    ],
+    [
+      "hall_south",
+      "door_main_hall_living"
+    ],
+    [
+      "door_main_hall_living",
+      "living"
+    ],
+    [
+      "hall_north",
+      "door_main_hall_dining"
+    ],
+    [
+      "door_main_hall_dining",
+      "dining"
+    ],
+    [
+      "hall_south",
+      "door_main_hall_bedroom_one"
+    ],
+    [
+      "door_main_hall_bedroom_one",
+      "bedroom_one"
+    ],
+    [
+      "hall_north",
+      "door_main_hall_bedroom_two"
+    ],
+    [
+      "door_main_hall_bedroom_two",
+      "bedroom_two"
+    ],
+    [
+      "hall_north",
+      "door_main_hall_exit_area"
+    ],
+    [
+      "door_main_hall_exit_area",
+      "exit_area"
+    ],
+    [
+      "living",
+      "door_living_storage"
+    ],
+    [
+      "door_living_storage",
+      "storage"
+    ],
+    [
+      "living",
+      "door_living_dining"
+    ],
+    [
+      "door_living_dining",
+      "dining"
+    ],
+    [
+      "dining",
+      "door_dining_kitchen"
+    ],
+    [
+      "door_dining_kitchen",
+      "kitchen"
+    ],
+    [
+      "kitchen",
+      "door_kitchen_storage"
+    ],
+    [
+      "door_kitchen_storage",
+      "storage"
+    ],
+    [
+      "storage",
+      "door_storage_south_west"
+    ],
+    [
+      "door_storage_south_west",
+      "south_west"
+    ],
+    [
+      "living",
+      "door_living_south_west"
+    ],
+    [
+      "door_living_south_west",
+      "south_west"
+    ],
+    [
+      "kitchen",
+      "door_kitchen_north_west"
+    ],
+    [
+      "door_kitchen_north_west",
+      "north_west"
+    ],
+    [
+      "dining",
+      "door_dining_north_west"
+    ],
+    [
+      "door_dining_north_west",
+      "north_west"
+    ],
+    [
+      "north_west",
+      "door_north_west_exit_area"
+    ],
+    [
+      "door_north_west_exit_area",
+      "exit_area"
+    ],
+    [
+      "south_east",
+      "door_south_east_bedroom_one"
+    ],
+    [
+      "door_south_east_bedroom_one",
+      "bedroom_one"
+    ],
+    [
+      "south_east",
+      "door_south_east_basement_entrance"
+    ],
+    [
+      "door_south_east_basement_entrance",
+      "basement_entrance"
+    ],
+    [
+      "bedroom_one",
+      "door_bedroom_one_basement_entrance"
+    ],
+    [
+      "door_bedroom_one_basement_entrance",
+      "basement_entrance"
+    ],
+    [
+      "bedroom_one",
+      "door_bedroom_one_bedroom_two"
+    ],
+    [
+      "door_bedroom_one_bedroom_two",
+      "bedroom_two"
+    ],
+    [
+      "bedroom_two",
+      "door_bedroom_two_bathroom"
+    ],
+    [
+      "door_bedroom_two_bathroom",
+      "bathroom"
+    ],
+    [
+      "bathroom",
+      "door_bathroom_north_east"
+    ],
+    [
+      "door_bathroom_north_east",
+      "north_east"
+    ],
+    [
+      "bedroom_two",
+      "door_bedroom_two_north_east"
+    ],
+    [
+      "door_bedroom_two_north_east",
+      "north_east"
+    ],
+    [
+      "north_east",
+      "door_north_east_exit_area"
+    ],
+    [
+      "door_north_east_exit_area",
+      "exit_area"
+    ],
+    [
+      "exit_area",
+      "exit_approach"
+    ],
+    [
+      "main_hall",
+      "hall_south"
+    ],
+    [
+      "main_hall",
+      "hall_north"
+    ]
+  ],
+  "patrol_targets": [
+    "foyer",
+    "exit_area",
+    "living",
+    "dining",
+    "kitchen",
+    "storage",
+    "bedroom_one",
+    "bedroom_two",
+    "bathroom",
+    "basement_entrance"
+  ]
 }

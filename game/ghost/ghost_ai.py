@@ -45,6 +45,7 @@ class GhostAI:
         hud,
         jumpscare,
         collision_root=None,
+        patrol_targets=None,
     ):
 
         # =========================
@@ -59,6 +60,7 @@ class GhostAI:
         self.nav_nodes = nav_nodes
 
         self.graph = graph
+        self.patrol_targets = patrol_targets
 
         self.hud = hud
 
@@ -376,12 +378,16 @@ class GhostAI:
         )
 
         # Don't choose current node.
+        destinations = [node for node in (self.patrol_targets or self.nav_nodes)
+                        if node in self.nav_nodes]
+        if not destinations:
+            destinations = list(self.nav_nodes)
         available_nodes = [
 
             node_id
 
             for node_id
-            in self.nav_nodes
+            in destinations
 
             if node_id != start_node
         ]

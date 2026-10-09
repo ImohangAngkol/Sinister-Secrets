@@ -25,9 +25,9 @@ class SceneManager:
         self.player = HorrorPlayer(
             hud=hud,
             position=self.house.player_spawn,
-            rotation_y=90,
+            rotation_y=self.house.level.spawns["player"]["rotation_y"],
         )
-        self.player.camera_pivot.rotation_x = 32
+        self.player.camera_pivot.rotation_x = self.house.level.spawns["player"]["camera_pitch"]
 
         # =========================
         # GHOST
@@ -41,6 +41,7 @@ class SceneManager:
             on_caught=on_caught,
             position=self.house.ghost_spawn,
             collision_root=self.house,
+            patrol_targets=self.house.patrol_targets,
         )
 
     def stop_gameplay(self):

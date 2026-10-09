@@ -1,3 +1,1017 @@
 {
-  "status": "placeholder_for_future_level_data"
+  "schema_version": 1,
+  "id": "haunted_house",
+  "bounds": [
+    -18,
+    -18,
+    18,
+    18
+  ],
+  "wall_height": 3.2,
+  "wall_thickness": 0.3,
+  "rooms": [
+    {
+      "id": "foyer",
+      "name": "Entrance Foyer",
+      "bounds": [
+        -6,
+        -18,
+        6,
+        -12
+      ],
+      "floor": [
+        68,
+        64,
+        62
+      ],
+      "center": [
+        0,
+        0,
+        -15
+      ],
+      "props": [
+        {
+          "kind": "console",
+          "position": [
+            1.5,
+            0,
+            -17
+          ]
+        },
+        {
+          "kind": "bench",
+          "position": [
+            -3.5,
+            0,
+            -17
+          ],
+          "tint": [
+            100,
+            43,
+            44
+          ]
+        }
+      ]
+    },
+    {
+      "id": "main_hall",
+      "name": "Main Hallway",
+      "bounds": [
+        -2,
+        -12,
+        2,
+        12
+      ],
+      "floor": [
+        55,
+        58,
+        63
+      ],
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "props": [
+        {
+          "kind": "clock",
+          "position": [
+            1.45,
+            0,
+            1.5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "exit_area",
+      "name": "Exit Area",
+      "bounds": [
+        -6,
+        12,
+        6,
+        18
+      ],
+      "floor": [
+        61,
+        65,
+        62
+      ],
+      "center": [
+        0,
+        0,
+        15
+      ],
+      "props": []
+    },
+    {
+      "id": "living",
+      "name": "Living Room",
+      "bounds": [
+        -10,
+        -12,
+        -2,
+        0
+      ],
+      "floor": [
+        62,
+        58,
+        61
+      ],
+      "center": [
+        -6,
+        0,
+        -6
+      ],
+      "props": [
+        {
+          "kind": "sofa",
+          "position": [
+            -8.8,
+            0,
+            -2.8
+          ],
+          "rotation": 90,
+          "tint": [
+            98,
+            44,
+            46
+          ]
+        },
+        {
+          "kind": "table",
+          "position": [
+            -5,
+            0,
+            -9
+          ],
+          "size": [
+            2,
+            0.65,
+            1.2
+          ]
+        },
+        {
+          "kind": "cabinet",
+          "position": [
+            -3,
+            0,
+            -2
+          ],
+          "size": [
+            1,
+            1.8,
+            0.65
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dining",
+      "name": "Dining Room",
+      "bounds": [
+        -10,
+        0,
+        -2,
+        12
+      ],
+      "floor": [
+        64,
+        61,
+        56
+      ],
+      "center": [
+        -6,
+        0,
+        6
+      ],
+      "props": [
+        {
+          "kind": "table",
+          "position": [
+            -8.2,
+            0,
+            3.5
+          ],
+          "size": [
+            1.7,
+            0.95,
+            2.2
+          ]
+        },
+        {
+          "kind": "chair",
+          "position": [
+            -7,
+            0,
+            3.5
+          ],
+          "rotation": 90
+        },
+        {
+          "kind": "chair",
+          "position": [
+            -8.2,
+            0,
+            1.9
+          ]
+        },
+        {
+          "kind": "cabinet",
+          "position": [
+            -3.2,
+            0,
+            10
+          ],
+          "size": [
+            1.2,
+            1.5,
+            0.6
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "bounds": [
+        -18,
+        0,
+        -10,
+        12
+      ],
+      "floor": [
+        55,
+        65,
+        60
+      ],
+      "center": [
+        -14,
+        0,
+        6
+      ],
+      "props": [
+        {
+          "kind": "counter",
+          "position": [
+            -17,
+            0,
+            5
+          ],
+          "size": [
+            1.3,
+            1,
+            7
+          ]
+        },
+        {
+          "kind": "cabinet",
+          "position": [
+            -11.4,
+            0,
+            10
+          ],
+          "size": [
+            1.2,
+            2.2,
+            1.1
+          ]
+        },
+        {
+          "kind": "counter",
+          "position": [
+            -17,
+            0,
+            10.3
+          ],
+          "size": [
+            1.3,
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "name": "Storage Room",
+      "bounds": [
+        -18,
+        -12,
+        -10,
+        0
+      ],
+      "floor": [
+        58,
+        57,
+        53
+      ],
+      "center": [
+        -14,
+        0,
+        -6
+      ],
+      "props": [
+        {
+          "kind": "shelf",
+          "position": [
+            -17,
+            0,
+            -8
+          ],
+          "size": [
+            1.1,
+            2.3,
+            3
+          ]
+        },
+        {
+          "kind": "boxes",
+          "position": [
+            -11.4,
+            0,
+            -2
+          ],
+          "size": [
+            1.1,
+            1.2,
+            1.3
+          ]
+        },
+        {
+          "kind": "boxes",
+          "position": [
+            -16.5,
+            0,
+            -2
+          ],
+          "size": [
+            1.1,
+            0.8,
+            1.1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bedroom_one",
+      "name": "Bedroom One",
+      "bounds": [
+        2,
+        -12,
+        10,
+        0
+      ],
+      "floor": [
+        59,
+        59,
+        69
+      ],
+      "center": [
+        6,
+        0,
+        -6
+      ],
+      "props": [
+        {
+          "kind": "bed",
+          "position": [
+            8,
+            0,
+            -3
+          ],
+          "tint": [
+            58,
+            66,
+            93
+          ]
+        },
+        {
+          "kind": "cabinet",
+          "position": [
+            3.1,
+            0,
+            -10
+          ],
+          "size": [
+            1.2,
+            2.1,
+            0.8
+          ]
+        },
+        {
+          "kind": "console",
+          "position": [
+            8.8,
+            0,
+            -8.7
+          ],
+          "size": [
+            1,
+            0.7,
+            0.7
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bedroom_two",
+      "name": "Bedroom Two",
+      "bounds": [
+        2,
+        0,
+        10,
+        12
+      ],
+      "floor": [
+        66,
+        59,
+        65
+      ],
+      "center": [
+        6,
+        0,
+        6
+      ],
+      "props": [
+        {
+          "kind": "bed",
+          "position": [
+            8,
+            0,
+            3
+          ],
+          "tint": [
+            92,
+            58,
+            74
+          ]
+        },
+        {
+          "kind": "console",
+          "position": [
+            8.7,
+            0,
+            9
+          ],
+          "size": [
+            1,
+            0.7,
+            0.7
+          ]
+        },
+        {
+          "kind": "cabinet",
+          "position": [
+            3.1,
+            0,
+            10
+          ],
+          "size": [
+            1.2,
+            2.1,
+            0.8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bathroom",
+      "name": "Bathroom",
+      "bounds": [
+        10,
+        0,
+        18,
+        12
+      ],
+      "floor": [
+        56,
+        66,
+        69
+      ],
+      "center": [
+        14,
+        0,
+        6
+      ],
+      "props": [
+        {
+          "kind": "bath",
+          "position": [
+            16.6,
+            0,
+            7.5
+          ],
+          "size": [
+            1.6,
+            0.8,
+            3
+          ]
+        },
+        {
+          "kind": "sink",
+          "position": [
+            11.3,
+            0,
+            10
+          ],
+          "size": [
+            1,
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "basement_entrance",
+      "name": "Basement Entrance",
+      "bounds": [
+        10,
+        -12,
+        18,
+        0
+      ],
+      "floor": [
+        55,
+        56,
+        59
+      ],
+      "center": [
+        14,
+        0,
+        -6
+      ],
+      "props": [
+        {
+          "kind": "steps",
+          "position": [
+            16.8,
+            0,
+            -6
+          ],
+          "size": [
+            1.8,
+            0.5,
+            2.1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "south_west",
+      "name": "West Front Passage",
+      "bounds": [
+        -18,
+        -18,
+        -6,
+        -12
+      ],
+      "floor": [
+        58,
+        59,
+        62
+      ],
+      "center": [
+        -12,
+        0,
+        -15
+      ],
+      "props": []
+    },
+    {
+      "id": "south_east",
+      "name": "East Front Passage",
+      "bounds": [
+        6,
+        -18,
+        18,
+        -12
+      ],
+      "floor": [
+        58,
+        59,
+        62
+      ],
+      "center": [
+        12,
+        0,
+        -15
+      ],
+      "props": []
+    },
+    {
+      "id": "north_west",
+      "name": "West Rear Passage",
+      "bounds": [
+        -18,
+        12,
+        -6,
+        18
+      ],
+      "floor": [
+        58,
+        59,
+        62
+      ],
+      "center": [
+        -12,
+        0,
+        15
+      ],
+      "props": []
+    },
+    {
+      "id": "north_east",
+      "name": "East Rear Passage",
+      "bounds": [
+        6,
+        12,
+        18,
+        18
+      ],
+      "floor": [
+        58,
+        59,
+        62
+      ],
+      "center": [
+        12,
+        0,
+        15
+      ],
+      "props": [
+        {
+          "kind": "plant",
+          "position": [
+            16.8,
+            0,
+            16.7
+          ],
+          "tint": [
+            38,
+            101,
+            55
+          ]
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "foyer_main_hall",
+      "a": "foyer",
+      "b": "main_hall",
+      "axis": "z",
+      "line": -12,
+      "at": 0,
+      "width": 3
+    },
+    {
+      "id": "foyer_south_west",
+      "a": "foyer",
+      "b": "south_west",
+      "axis": "x",
+      "line": -6,
+      "at": -15,
+      "width": 3
+    },
+    {
+      "id": "foyer_south_east",
+      "a": "foyer",
+      "b": "south_east",
+      "axis": "x",
+      "line": 6,
+      "at": -15,
+      "width": 3
+    },
+    {
+      "id": "main_hall_living",
+      "a": "main_hall",
+      "b": "living",
+      "axis": "x",
+      "line": -2,
+      "at": -6,
+      "width": 3
+    },
+    {
+      "id": "main_hall_dining",
+      "a": "main_hall",
+      "b": "dining",
+      "axis": "x",
+      "line": -2,
+      "at": 6,
+      "width": 3
+    },
+    {
+      "id": "main_hall_bedroom_one",
+      "a": "main_hall",
+      "b": "bedroom_one",
+      "axis": "x",
+      "line": 2,
+      "at": -6,
+      "width": 3
+    },
+    {
+      "id": "main_hall_bedroom_two",
+      "a": "main_hall",
+      "b": "bedroom_two",
+      "axis": "x",
+      "line": 2,
+      "at": 6,
+      "width": 3
+    },
+    {
+      "id": "main_hall_exit_area",
+      "a": "main_hall",
+      "b": "exit_area",
+      "axis": "z",
+      "line": 12,
+      "at": 0,
+      "width": 3
+    },
+    {
+      "id": "living_storage",
+      "a": "living",
+      "b": "storage",
+      "axis": "x",
+      "line": -10,
+      "at": -6,
+      "width": 3
+    },
+    {
+      "id": "living_dining",
+      "a": "living",
+      "b": "dining",
+      "axis": "z",
+      "line": 0,
+      "at": -6,
+      "width": 3
+    },
+    {
+      "id": "dining_kitchen",
+      "a": "dining",
+      "b": "kitchen",
+      "axis": "x",
+      "line": -10,
+      "at": 6,
+      "width": 3
+    },
+    {
+      "id": "kitchen_storage",
+      "a": "kitchen",
+      "b": "storage",
+      "axis": "z",
+      "line": 0,
+      "at": -14,
+      "width": 3
+    },
+    {
+      "id": "storage_south_west",
+      "a": "storage",
+      "b": "south_west",
+      "axis": "z",
+      "line": -12,
+      "at": -14,
+      "width": 3
+    },
+    {
+      "id": "living_south_west",
+      "a": "living",
+      "b": "south_west",
+      "axis": "z",
+      "line": -12,
+      "at": -8,
+      "width": 3
+    },
+    {
+      "id": "kitchen_north_west",
+      "a": "kitchen",
+      "b": "north_west",
+      "axis": "z",
+      "line": 12,
+      "at": -14,
+      "width": 3
+    },
+    {
+      "id": "dining_north_west",
+      "a": "dining",
+      "b": "north_west",
+      "axis": "z",
+      "line": 12,
+      "at": -8,
+      "width": 3
+    },
+    {
+      "id": "north_west_exit_area",
+      "a": "north_west",
+      "b": "exit_area",
+      "axis": "x",
+      "line": -6,
+      "at": 15,
+      "width": 3
+    },
+    {
+      "id": "south_east_bedroom_one",
+      "a": "south_east",
+      "b": "bedroom_one",
+      "axis": "z",
+      "line": -12,
+      "at": 8,
+      "width": 3
+    },
+    {
+      "id": "south_east_basement_entrance",
+      "a": "south_east",
+      "b": "basement_entrance",
+      "axis": "z",
+      "line": -12,
+      "at": 14,
+      "width": 3
+    },
+    {
+      "id": "bedroom_one_basement_entrance",
+      "a": "bedroom_one",
+      "b": "basement_entrance",
+      "axis": "x",
+      "line": 10,
+      "at": -6,
+      "width": 3
+    },
+    {
+      "id": "bedroom_one_bedroom_two",
+      "a": "bedroom_one",
+      "b": "bedroom_two",
+      "axis": "z",
+      "line": 0,
+      "at": 6,
+      "width": 3
+    },
+    {
+      "id": "bedroom_two_bathroom",
+      "a": "bedroom_two",
+      "b": "bathroom",
+      "axis": "x",
+      "line": 10,
+      "at": 6,
+      "width": 3
+    },
+    {
+      "id": "bathroom_north_east",
+      "a": "bathroom",
+      "b": "north_east",
+      "axis": "z",
+      "line": 12,
+      "at": 14,
+      "width": 3
+    },
+    {
+      "id": "bedroom_two_north_east",
+      "a": "bedroom_two",
+      "b": "north_east",
+      "axis": "z",
+      "line": 12,
+      "at": 8,
+      "width": 3
+    },
+    {
+      "id": "north_east_exit_area",
+      "a": "north_east",
+      "b": "exit_area",
+      "axis": "x",
+      "line": 6,
+      "at": 15,
+      "width": 3
+    }
+  ],
+  "exit_opening": {
+    "axis": "z",
+    "line": 18,
+    "at": 0,
+    "width": 3
+  },
+  "extra_walls": [
+    {
+      "position": [
+        15.6,
+        1.6,
+        -7.6
+      ],
+      "scale": [
+        0.3,
+        3.2,
+        0.8
+      ]
+    },
+    {
+      "position": [
+        15.6,
+        1.6,
+        -4.4
+      ],
+      "scale": [
+        0.3,
+        3.2,
+        0.8
+      ]
+    },
+    {
+      "position": [
+        16.8,
+        1.6,
+        -8
+      ],
+      "scale": [
+        2.4,
+        3.2,
+        0.3
+      ]
+    },
+    {
+      "position": [
+        16.8,
+        1.6,
+        -4
+      ],
+      "scale": [
+        2.4,
+        3.2,
+        0.3
+      ]
+    }
+  ],
+  "views": {
+    "foyer": {
+      "position": [
+        -3,
+        1.8,
+        -15.8
+      ],
+      "target": [
+        2,
+        1,
+        -16.4
+      ]
+    },
+    "main_hall": {
+      "position": [
+        0,
+        1.8,
+        -10
+      ],
+      "target": [
+        0,
+        1.6,
+        10
+      ]
+    },
+    "living": {
+      "position": [
+        -3.2,
+        1.8,
+        -10.3
+      ],
+      "target": [
+        -8.5,
+        1,
+        -3.5
+      ]
+    },
+    "kitchen": {
+      "position": [
+        -11.5,
+        1.8,
+        1.5
+      ],
+      "target": [
+        -16.5,
+        1,
+        7
+      ]
+    },
+    "bedroom": {
+      "position": [
+        3.6,
+        1.8,
+        8.7
+      ],
+      "target": [
+        8,
+        1,
+        3
+      ]
+    },
+    "overview": {
+      "position": [
+        0,
+        42,
+        -32
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ]
+    }
+  }
 }
