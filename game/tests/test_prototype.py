@@ -10,12 +10,12 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from panda3d.core import Filename, LightAttrib, loadPrcFileData
+from panda3d.core import Filename, FogAttrib, LightAttrib, loadPrcFileData
 
 loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 
 from PIL import Image, ImageStat
-from ursina import Entity, Ursina, Vec3, application, camera, destroy, held_keys, mouse, scene, time
+from ursina import Entity, Ursina, Vec3, application, camera, color, destroy, held_keys, mouse, scene, time
 
 from game.game_manager import GameManager
 from game.ghost.ghost_navigation import astar
@@ -26,7 +26,8 @@ from game.items.battery import BatteryPickup
 from game.items.flashlight import FlashlightPickup
 from game.items.key import KeyPickup
 from game.player.interaction import get_interaction_hit
-from game.settings import FLASHLIGHT_DRAIN_PER_SECOND, MAX_BATTERY
+from game.settings import (FLASHLIGHT_COLOR, FLASHLIGHT_DRAIN_PER_SECOND, FLASHLIGHT_FOV,
+                           FLASHLIGHT_RANGE, HOUSE_FOG_DENSITY, MAX_BATTERY)
 from game.ghost.ghost_navigation import GhostNavigation
 from game.world.environment import world_raycast
 
@@ -605,9 +606,15 @@ class PrototypeTests(unittest.TestCase):
         crop = (400, 220, 880, 580)
         off_mean = sum(ImageStat.Stat(off.crop(crop)).mean) / 3
         on_mean = sum(ImageStat.Stat(on.crop(crop)).mean) / 3
-        self.assertGreater(off_mean, 20, "World is too dark with flashlight off")
-        self.assertGreater(on_mean, off_mean + 5, "Flashlight has no visible effect")
+        self.assertGreater(off_mean, 3, "Nearby geometry is completely black")
+        self.assertLess(off_mean, 25, "Flashlight-off view is too bright for horror lighting")
+        self.assertGreater(on_mean, off_mean + 20, "Flashlight has no visible effect")
         self.player.toggle_flashlight()
+        # Palette/geometry inspection uses developer lighting: the gameplay
+        # fog intentionally hides the layout from this very distant camera.
+        scene.clear_fog()
+        self.manager.scene_manager.lights[0].color = color.rgb(0.4, 0.4, 0.45)
+        self.manager.scene_manager.lights[1].color = color.rgb(0.2, 0.2, 0.18)
         camera.world_parent = scene
         self.house.ceiling.visible = False
         camera.position = Vec3(0, 42, -32)
@@ -619,6 +626,167 @@ class PrototypeTests(unittest.TestCase):
         self.assertGreater(sum(r > g * 1.5 and r > b * 1.5 and r > 30 for r, g, b in pixels), 50)
         self.assertGreater(sum(g > r * 1.5 and g > b * 1.5 and g > 30 for r, g, b in pixels), 50)
         self.assertLess(sum(min(rgb) > 245 for rgb in pixels) / len(pixels), 0.05)
+
+    def test_native_flashlight_activation_flicker_depletion_and_registration(self):
+        light = self.player.flashlight_light
+        native = light._light
+        registered = self.app.render.get_state().get_attrib(LightAttrib)
+        self.assertEqual(registered.get_num_on_lights(), 3)
+        self.assertAlmostEqual(native.get_lens().get_hfov(), FLASHLIGHT_FOV)
+        self.assertAlmostEqual(native.get_lens().get_far(), FLASHLIGHT_RANGE)
+        self.assertTrue(native.is_shadow_caster())
+        self.assertEqual(native.get_color().xyz, Vec3(0, 0, 0))
+        self.player.input("f")
+        self.assertEqual(native.get_color().xyz, Vec3(0, 0, 0))
+        self.player.obtain_flashlight()
+        self.player.input("f")
+        self.assertGreater(native.get_color().x, 1)
+        self.player.stats.battery = 10
+        self.player._flicker_active = True
+        self.player._flicker_dark = True
+        self.player._flicker_remaining = 0.1
+        time.dt = 0
+        self.player._update_flashlight()
+        self.assertTrue(self.player.flashlight_on)
+        self.assertEqual(native.get_color().xyz, Vec3(0, 0, 0))
+        self.player.stats.battery = 0.01
+        time.dt = 1 / 4
+        self.player._update_flashlight()
+        self.assertEqual(self.player.stats.battery, 0)
+        self.assertFalse(self.player.flashlight_on)
+        self.assertEqual(native.get_color().xyz, Vec3(0, 0, 0))
+        self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib), registered)
+
+    def test_native_beam_follows_camera_and_simulated_mouse_without_lag(self):
+        self.player.obtain_flashlight()
+        self.player.input("f")
+        for yaw, pitch in ((0, 0), (90, 35), (-135, -55), (179, 80)):
+            self.player.rotation_y = yaw
+            self.player.camera_pivot.rotation_x = pitch
+            self.player._update_flashlight()
+            light = self.player.flashlight_light
+            direction = scene.get_relative_vector(light.get_children()[0], light._light.get_lens().get_view_vector())
+            self.assertGreater(direction.normalized().dot(camera.forward.normalized()), 0.9999)
+            self.assertLess((light.world_position - camera.world_position).length(), 0.00001)
+        mouse.velocity = Vec3(0.2, -0.1, 0)
+        self.player.update()
+        light = self.player.flashlight_light
+        direction = scene.get_relative_vector(light.get_children()[0], light._light.get_lens().get_view_vector())
+        self.assertGreater(direction.normalized().dot(camera.forward.normalized()), 0.9999)
+
+    def test_real_flashlight_shadow_occlusion(self):
+        # Observe a receiver from a different direction to the lamp, so the
+        # occluded surface remains visible to the camera. No mocked lighting.
+        scene.clear_fog()
+        camera.world_parent = scene
+        camera.position, camera.rotation = Vec3(40, 1.5, -6), Vec3(0, 0, 0)
+        root = Entity()
+        root.set_shader_auto()
+        Entity(parent=root, model="cube", shader=None, color=color.rgb32(130, 130, 130),
+               position=(40, 1.5, 0), scale=(4, 3, 0.1))
+        blocker = Entity(parent=root, model="cube", shader=None,
+                         position=(41.5, 1.5, -2), scale=(0.9, 3, 0.4))
+        light = self.player.flashlight_light
+        light.color = color.rgb(*FLASHLIGHT_COLOR)
+        light.position, light.rotation = Vec3(43, 1.5, -4), Vec3(0, -36.87, 0)
+        blocked = self.capture("render_shadow_blocked.png")
+        destroy(blocker)
+        clear = self.capture("render_shadow_clear.png")
+        crop = (590, 300, 690, 420)
+        blocked_mean = sum(ImageStat.Stat(blocked.crop(crop)).mean) / 3
+        clear_mean = sum(ImageStat.Stat(clear.crop(crop)).mean) / 3
+        self.assertGreater(clear_mean, blocked_mean + 8, "Opaque geometry did not cast a flashlight shadow")
+
+    def test_beam_falloff_and_dark_geometry_outside_cone(self):
+        camera.world_parent = scene
+        camera.position, camera.rotation = Vec3(40, 1.5, -6), Vec3(0, 0, 0)
+        probe = Entity(model="cube", shader=None, color=color.rgb32(130, 130, 130),
+                       position=(40, 1.5, 0), scale=(16, 10, 0.1))
+        probe.set_shader_auto()
+        self.player.obtain_flashlight()
+        self.manager.hud.message.enabled = False
+        off = self.capture("render_cone_off.png")
+        self.player.input("f")
+        far = self.capture("render_cone_far.png")
+        centre, edge = (590, 300, 690, 420), (40, 300, 140, 420)
+        mean = lambda picture, region: sum(ImageStat.Stat(picture.crop(region)).mean) / 3
+        self.assertGreater(mean(far, centre), mean(off, centre) + 10)
+        self.assertAlmostEqual(mean(far, edge), mean(off, edge), delta=1)
+        probe.z = -3
+        probe.scale = (8, 5, 0.1)
+        near = self.capture("render_cone_near.png")
+        self.assertGreater(mean(near, centre), mean(far, centre) + 15)
+
+    def test_room_floor_and_furniture_receive_world_lighting(self):
+        for room in self.house.rooms.values():
+            self.assertIsNone(room.shader, "Room container overrides generated lighting")
+            for prop in room.props:
+                self.assertIsNone(prop.shader, "Furniture container overrides generated lighting")
+        camera.world_parent = scene
+        self.player.obtain_flashlight()
+        self.manager.hud.message.enabled = False
+        for name, position, target in (("floor", (-6, 1.8, -10), (-6, 0, -9)),
+                                       ("table", (-5, 1.8, -11), (-5, 0.65, -9))):
+            with self.subTest(surface=name):
+                camera.position = Vec3(*position)
+                direction = Vec3(*target) - camera.position
+                camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
+                                       math.degrees(math.atan2(direction.x, direction.z)), 0)
+                off = self.capture(f"render_surface_{name}_off.png")
+                self.player.input("f")
+                on = self.capture(f"render_surface_{name}_on.png")
+                crop = (590, 300, 690, 420)
+                off_mean = sum(ImageStat.Stat(off.crop(crop)).mean) / 3
+                on_mean = sum(ImageStat.Stat(on.crop(crop)).mean) / 3
+                self.assertLess(off_mean, 15)
+                self.assertGreater(on_mean, off_mean + 10)
+                self.player.input("f")
+
+    def test_real_beam_reveals_ghost_battery_key_and_exit_door(self):
+        camera.world_parent = scene
+        self.player.obtain_flashlight()
+        self.manager.hud.message.enabled = False
+        self.ghost.enabled = True  # renderFrame does not advance AI.
+        self.ghost.position = Vec3(0, 0, -2)
+        views = [("ghost", Vec3(0, 1.8, -7), Vec3(0, 1, -2)),
+                 ("battery", Vec3(-15, 1.8, 5), self.pickup(BatteryPickup).world_position),
+                 ("key", Vec3(7.2, 1.8, 9), self.pickup(KeyPickup).world_position),
+                 ("exit", Vec3(0, 1.8, 15), Vec3(0, 1.5, 17.8))]
+        for name, position, target in views:
+            with self.subTest(subject=name):
+                camera.position = position
+                direction = target - position
+                camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
+                                       math.degrees(math.atan2(direction.x, direction.z)), 0)
+                off = self.capture(f"render_subject_{name}_off.png")
+                self.player.input("f")
+                on = self.capture(f"render_subject_{name}_on.png")
+                crop = (625, 345, 655, 375)
+                off_mean = sum(ImageStat.Stat(off.crop(crop)).mean) / 3
+                on_mean = sum(ImageStat.Stat(on.crop(crop)).mean) / 3
+                self.assertGreater(on_mean, off_mean + 8)
+                self.assertLess(off_mean, 30)
+                self.player.input("f")
+
+    def test_dark_distance_fog_is_configured_and_hud_is_unlit(self):
+        fog = scene.get_state().get_attrib(FogAttrib).get_fog()
+        self.assertEqual(fog.get_mode(), fog.M_exponential)
+        self.assertAlmostEqual(fog.get_exp_density(), HOUSE_FOG_DENSITY)
+        self.assertGreater(HOUSE_FOG_DENSITY, 0)
+        self.assertFalse(camera.ui.get_top() == scene.get_top())
+        # Distant identical surfaces receive less contrast than nearby ones.
+        camera.world_parent = scene
+        camera.position, camera.rotation = Vec3(40, 1.5, -6), Vec3(0, 0, 0)
+        probe = Entity(model="cube", shader=None, color=color.rgb32(140, 140, 140),
+                       position=(40, 1.5, -3), scale=(3, 3, 0.1))
+        probe.set_shader_auto()
+        near = self.capture("render_fog_near.png")
+        probe.z = 18
+        probe.scale = (24, 24, 0.1)  # Same angular size at eight times the range.
+        far = self.capture("render_fog_far.png")
+        crop = (500, 250, 780, 470)
+        self.assertGreater(sum(ImageStat.Stat(near.crop(crop)).mean),
+                           sum(ImageStat.Stat(far.crop(crop)).mean) + 3)
 
     def walk_to(self, point):
         """Drive the actual controller with simulated W input; never teleport."""

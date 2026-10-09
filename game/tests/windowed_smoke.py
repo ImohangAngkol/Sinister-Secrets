@@ -11,6 +11,7 @@ import time as wall_clock
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import Filename, WindowProperties, loadPrcFileData
+from PIL import Image, ImageStat
 
 loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 
@@ -29,6 +30,13 @@ def verify_window(app):
     def capture(name):
         path = Path(__file__).parent / name
         assert app.win.saveScreenshot(Filename.from_os_specific(str(path.resolve())))
+        return Image.open(path).convert("RGB")
+
+    def pose(position, target):
+        camera.position = Vec3(*position)
+        direction = Vec3(*target) - camera.position
+        camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
+                               math.degrees(math.atan2(direction.x, direction.z)), 0)
 
     try:
         frames(60)
@@ -92,24 +100,80 @@ def verify_window(app):
         # point. Pose the developer camera and freeze gameplay only for these
         # images; this is visual verification, not a claimed human playthrough.
         house = manager.scene_manager.house
-        manager.scene_manager.player.enabled = False
-        manager.scene_manager.ghost.enabled = False
+        player = manager.scene_manager.player
+        app.input("e", is_raw=True)  # Spawn view faces the foyer flashlight.
+        assert player.has_flashlight
+        app.input("f", is_raw=True)
+        assert player.flashlight_on and player.flashlight_light.color.r > 0
+        charge = player.stats.battery
+        frames()
+        assert player.stats.battery < charge
+        app.input("f", is_raw=True)
+        assert not player.flashlight_on and player.flashlight_light.color.r == 0
+        charge = player.stats.battery
+        frames(2)
+        assert player.stats.battery == charge
+        player.enabled = False
+        ghost = manager.scene_manager.ghost
+        ghost.update = lambda: None  # Freeze AI only during image comparisons.
+        ghost.position = (0, 0, -2)
         mouse.locked = False
         manager.hud.set_prompt("")
+        manager.hud.message.enabled = False
         camera.world_parent = scene
-        for name, view in house.level.house["views"].items():
+        views = dict(house.level.house["views"])
+        overview = views.pop("overview")
+        views.update({
+            "ghost": {"position": (0, 1.8, -7), "target": (0, 1, -2)},
+            "battery": {"position": (-15, 1.8, 5), "target": (-16.6, 1.2, 5)},
+            "key": {"position": (7.2, 1.8, 9), "target": (8.7, 0.9, 9)},
+            "exit": {"position": (0, 1.8, 15), "target": (0, 1.5, 17.8)},
+        })
+        views["overview"] = overview
+        print("LIGHTING_GPU:", app.win.get_gsg().get_driver_renderer())
+        for name, view in views.items():
             house.ceiling.visible = name != "overview"
-            camera.position = Vec3(*view["position"])
-            direction = Vec3(*view["target"]) - camera.position
-            camera.rotation = Vec3(math.degrees(math.atan2(-direction.y, math.hypot(direction.x, direction.z))),
-                                   math.degrees(math.atan2(direction.x, direction.z)), 0)
-            room_id = "bedroom_two" if name == "bedroom" else name
-            manager.hud.show_message("House layout" if name == "overview" else house.rooms[room_id].title)
+            pose(view["position"], view["target"])
+            if name == "overview":
+                # Developer inspection lighting, not the gameplay atmosphere.
+                from ursina import color
+                scene.clear_fog()
+                manager.scene_manager.lights[0].color = color.rgb(0.4, 0.4, 0.45)
+                manager.scene_manager.lights[1].color = color.rgb(0.2, 0.2, 0.18)
+                frames(4)
+                capture("render_house_overview.png")
+                continue
+            player._set_flashlight_light(False)
             frames(4)
-            capture(f"render_house_{name}.png")
+            off = capture(f"render_lighting_{name}_off.png")
+            player.toggle_flashlight()
+            frames(4)
+            on = capture(f"render_lighting_{name}_on.png")
+            if name in house.level.house["views"]:
+                capture(f"render_house_{name}.png")
+            # Ignore HUD; measure the same stationary world geometry.
+            region = (160, 180, 1120, 640)
+            off_mean = statistics.mean(ImageStat.Stat(off.crop(region)).mean)
+            on_mean = statistics.mean(ImageStat.Stat(on.crop(region)).mean)
+            assert on_mean > off_mean + 2, (name, off_mean, on_mean)
+            print(f"LIGHTING_PIXELS {name}: OFF={off_mean:.2f}, ON={on_mean:.2f}")
+            player.toggle_flashlight()
+            if name == "main_hall":
+                for enabled in (False, True):
+                    player._set_flashlight_light(enabled)
+                    frames(12)
+                    costs = []
+                    for _ in range(120):
+                        before = wall_clock.perf_counter()
+                        app.taskMgr.step()
+                        costs.append((wall_clock.perf_counter() - before) * 1000)
+                    print(f"LIGHTING_TIMING {'ON' if enabled else 'OFF'}: "
+                          f"median={statistics.median(costs):.2f}ms p95={sorted(costs)[113]:.2f}ms "
+                          "(native 1280x720, frozen camera/AI)")
+                player._set_flashlight_light(False)
         print(f"HOUSE_VIEWS_OK: {len(house.rooms)} areas, {len(house.nav_nodes)} nodes, "
               f"{len(house.level.navigation['edges'])} edges, "
-              f"{len(scene.collidables)} colliders, six authored screenshots")
+              f"{len(scene.collidables)} colliders, six authored screenshots and nine OFF/ON pairs")
     finally:
         app.destroy()
 

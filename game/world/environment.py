@@ -1,6 +1,9 @@
 from ursina import AmbientLight, DirectionalLight, Vec3, color, scene, window
 from ursina.hit_info import HitInfo
-from panda3d.core import CollisionHandlerQueue, CollisionNode, CollisionRay, CollisionTraverser
+from panda3d.core import CollisionHandlerQueue, CollisionNode, CollisionRay, CollisionTraverser, Fog
+
+from game.settings import (HOUSE_AMBIENT_COLOR, HOUSE_FILL_COLOR, HOUSE_FOG_COLOR,
+                           HOUSE_FOG_DENSITY, HOUSE_SIGN_COLOR)
 
 
 _world_ray = None
@@ -50,15 +53,24 @@ def world_raycast(origin, direction=(0, 0, 1), distance=9999,
 
 
 def create_environment(parent):
-    # Ursina's default clear fog still enables Panda's FogAttrib. Its unset
-    # range blacks out the generated shader; the prototype needs no fog yet.
+    # Replace Ursina's unconfigured default linear fog. In 8.3 its numeric
+    # fog_density setter does not configure exponential fog at all. Explicit
+    # Panda3D exponential fog works with the existing generated world shader.
     scene.clear_fog()
+    fog = Fog("house_distance_fog")
+    fog.set_color(*HOUSE_FOG_COLOR)
+    fog.set_exp_density(HOUSE_FOG_DENSITY)
+    scene.set_fog(fog)
     ambient = AmbientLight(
         parent=parent,
-        color=color.rgb(0.58, 0.58, 0.60),
+        color=color.rgb(*HOUSE_AMBIENT_COLOR),
     )
     fill = DirectionalLight(parent=parent, shadows=False)
-    fill.color = color.rgb(0.30, 0.30, 0.28)
+    fill.color = color.rgb(*HOUSE_FILL_COLOR)
     fill.look_at(Vec3(1, -2, -1))
-    window.color = color.rgb32(18, 20, 25)
+    window.color = color.rgb(*HOUSE_FOG_COLOR)
+    # World Text uses an unlit SDF shader. Keep it faint rather than turning
+    # labels into bright signs in otherwise dark rooms. UI is a separate scene.
+    for room in parent.rooms.values():
+        room.sign.color = color.rgb32(*HOUSE_SIGN_COLOR)
     return ambient, fill

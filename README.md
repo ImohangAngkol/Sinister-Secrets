@@ -45,8 +45,9 @@ the opening to escape. The ghost uses placeholder geometry.
 - Use `color.rgb32`/`rgba32` for 0-255 values. Ursina 8.3's `rgb`/`rgba`
   expect normalized 0-1 values; the previous values saturated the surfaces.
 - Create ambient/fill lighting and use Panda3D's generated shader only for
-  world geometry. UI retains Ursina's unlit/text shaders. Disable the inherited
-  default fog, which rendered the generated lighting black.
+  world geometry. Clear unlit shader overrides on room/furniture containers;
+  UI retains Ursina's unlit/text shaders. Replace the inherited unset fog,
+  which rendered generated lighting black, with explicit exponential fog.
 - Keep the spotlight registered and toggle its color contribution. Disabling a
   Light Entity alone does not remove its registered Panda3D light. The beam
   follows camera rotation, casts shadows, and drains battery only while on.
@@ -90,8 +91,10 @@ launch as `render_windowed.png`.
 
 Baseline `f1a6f2c` passed its original 13 tests before Milestone 1 changes.
 Milestone 2 started from clean `main` commit `c49e6eb`, with all 25 Milestone 1
-tests passing. The current suite passes **39 tests**: those 25 cases plus 14
-house/data checks. Map-dependent test coordinates and waypoint IDs were adapted
+tests passing. Milestone 2 passed **39 tests**: those 25 cases plus 14
+house/data checks. Milestone 2.5 started from clean `main` commit `434a24e`,
+with those 39 tests passing, and adds seven lighting regressions for **46 tests**.
+Map-dependent test coordinates and waypoint IDs were adapted
 to the authored layout; the original movement, interaction, collision, state,
 flicker and restart assertions remain. The original exit test waits for the
 opening animation before expecting clearance.
@@ -243,6 +246,71 @@ and furniture are development placeholders; the overview intentionally removes
 the ceiling visually. No puzzle, save, advanced inventory or audio implementation
 was added, and no commits, merges or pushes were performed.
 
+## Milestone 2.5: darkness and flashlight lighting
+
+Ambient light is reduced to (0.10, 0.11, 0.14), with a very faint directional
+fill. Nearby silhouettes remain visible; muted exponential fog (density 0.055)
+reduces distant contrast. The background matches the fog. This explicitly uses
+Panda3D's `Fog.set_exp_density`: Ursina 8.3's numeric `scene.fog_density` setter
+does not configure exponential density.
+
+The important rendering fix clears the default unlit shader on model-less
+Room and furniture containers. Previously those containers overrode House's
+generated lighting, leaving their floors and props bright and unresponsive to
+the spotlight. Walls, floors, props, doors, pickups and the ghost now use the
+existing generated shader. Geometry, room data and collisions are unchanged.
+
+The existing camera-following native spotlight uses a 56-degree cone, warm light,
+constant/linear/quadratic attenuation and an 18-unit shadow lens range. Its
+intensity and constant attenuation are paired to reveal objects across a room
+without washing out nearby gray walls. One 512 x 512 shadow map blocks direct
+light behind opaque geometry. Registration stays stable; OFF, dark flicker
+intervals, depleted battery and cleanup set its contribution to zero. Drain
+remains 3.5 percentage points per second and flicker remains time-based. No
+screen overlay, custom shader, external assets or bloom was introduced.
+
+Lighting values are centralized in `game/settings.py`. Set `FLASHLIGHT_SHADOWS`
+to `False` for a cheaper fallback, with the limitation that direct light can
+then pass through walls. The default keeps shadows enabled. Shadow-map edges
+can be coarse, the cone has a visible boundary on close walls, and exponential
+fog is distance haze rather than a volumetric beam. The useful illumination
+range is gradual, not a hard visibility boundary. World labels remain faint
+unlit navigation markers; the HUD remains bright and independent of world fog.
+Monitor brightness and lower-end GPU performance still need human assessment.
+
+Seven new regressions check native activation/flicker/depletion and stable
+registration, camera alignment after simulated mouse input, real shadow
+occlusion, dark geometry outside the cone and distance falloff, floor/furniture
+lighting, ghost/battery/key/exit illumination, and configured distance fog.
+The existing visibility test now asserts intentional darkness; only the
+developer palette overview uses brighter temporary lighting and no fog.
+
+Run the native smoke harness to generate nine identical-camera OFF/ON pairs:
+`render_lighting_{foyer,main_hall,living,kitchen,bedroom,ghost,battery,key,exit}_{off,on}.png`
+in `game/tests`. The harness dispatches E/F through the real engine before
+posing the comparison camera and freezing player/AI updates. Screenshot pairs
+do not advance battery time. The elevated overview uses developer lighting.
+The offscreen suite also saves real shadow, falloff, fog and subject captures.
+These are real rendered images with scripted poses and inputs, not a human
+playthrough. Existing native focus-handler fallback limitations still apply.
+
+At 1280 x 720 on the NVIDIA RTX 3050 Laptop GPU, the 120-frame native samples
+with frozen camera/AI measured 6.96 ms median / 8.86 ms p95 with light OFF and
+7.04 ms median / 11.42 ms p95 with light ON. OFF keeps the registered shadow light
+to avoid shader regeneration; this comparison does not measure shadow-map cost
+against disabling shadows. Nine world-region brightness comparisons increased
+when ON, and reviewed captures showed colored geometry rather than white walls.
+Compilation, all 46 tests and `git diff --check` passed. Normal engine PNG-profile
+and missing-icon warnings remain; no shader errors were observed.
+
+Modified files: `game/settings.py`, `game/world/environment.py`,
+`game/world/room.py`, `game/player/player.py`, `game/tests/test_prototype.py`,
+`game/tests/windowed_smoke.py`, and `README.md`.
+
+Engine references: [Panda3D lighting and shadow mapping](https://docs.panda3d.org/1.10/python/programming/render-attributes/lighting),
+[generated shaders](https://docs.panda3d.org/1.10/python/programming/shaders/shader-generator),
+and [exponential fog](https://docs.panda3d.org/1.10/python/programming/render-attributes/fog).
+
 ## Manual verification
 
 From PowerShell:
@@ -258,7 +326,11 @@ Set-Location 'C:\Users\User\Desktop\Sinister_Secrets'
    existing visual pursuit can continue. The automated test checks noise exactly.
 2. Aim at the white flashlight near spawn and press E. Toggle F; confirm the
    beam follows the camera, switching off stops drain, and switching on resumes
-   it. Below 15%, observe flicker; at 0%, confirm the light turns off.
+   it. Compare the same wall/prop/ghost with F off and on: the lit object should
+   retain its color, with objects outside the cone staying dark. Aim down a long
+   hallway and around a doorway; check distant haze and wall occlusion. Nearby
+   silhouettes should remain faintly visible without the flashlight. Below 15%,
+   observe flicker; at 0%, confirm the light turns off.
 3. Reach the kitchen via living -> storage -> kitchen, or main hall -> dining ->
    kitchen. Use E on the blue counter battery while below 100%; charge increases
    by up to 35 points and the pickup vanishes.

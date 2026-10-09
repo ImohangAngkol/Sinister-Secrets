@@ -12,6 +12,21 @@ FLASHLIGHT_START_BATTERY = 65
 FLASHLIGHT_DRAIN_PER_SECOND = 3.5
 LOW_BATTERY_THRESHOLD = 15
 
+# LIGHTING (normalized RGB intensities; lights may exceed 1, distances in units)
+HOUSE_AMBIENT_COLOR = (0.10, 0.11, 0.14)
+HOUSE_FILL_COLOR = (0.015, 0.018, 0.025)
+HOUSE_FOG_COLOR = (0.006, 0.008, 0.013)
+HOUSE_FOG_DENSITY = 0.055
+HOUSE_SIGN_COLOR = (32, 35, 41)  # Faint navigation labels; HUD stays unlit.
+FLASHLIGHT_COLOR = (4.0, 3.78, 3.36)
+FLASHLIGHT_FOV = 56
+FLASHLIGHT_RANGE = 18
+# Constant term limits close-up brightness; quadratic term softens distant light.
+FLASHLIGHT_ATTENUATION = (3.2, 0.035, 0.025)
+FLASHLIGHT_EXPONENT = 12
+FLASHLIGHT_SHADOWS = True  # False is cheaper but permits light through walls.
+FLASHLIGHT_SHADOW_RESOLUTION = 512
+
 # GHOST
 GHOST_PATROL_SPEED = 2.1
 GHOST_INVESTIGATE_SPEED = 2.6

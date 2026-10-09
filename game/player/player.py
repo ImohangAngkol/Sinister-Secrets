@@ -30,6 +30,13 @@ from game.player.interaction import (
 from game.player.player_stats import PlayerStats
 from game.settings import (
     FLASHLIGHT_DRAIN_PER_SECOND,
+    FLASHLIGHT_ATTENUATION,
+    FLASHLIGHT_COLOR,
+    FLASHLIGHT_EXPONENT,
+    FLASHLIGHT_FOV,
+    FLASHLIGHT_RANGE,
+    FLASHLIGHT_SHADOWS,
+    FLASHLIGHT_SHADOW_RESOLUTION,
     LOW_BATTERY_THRESHOLD,
     MAX_BATTERY,
     PLAYER_HEIGHT,
@@ -71,10 +78,13 @@ class HorrorPlayer(FirstPersonController):
             color=color.rgb(0, 0, 0),
         )
         lens = self.flashlight_light._light.get_lens()
-        lens.set_fov(52)
-        lens.set_near_far(0.1, 24)
-        self.flashlight_light._light.set_attenuation(Vec3(1, 0, 0.015))
-        self.flashlight_light._light.set_shadow_caster(True, 512, 512)
+        lens.set_fov(FLASHLIGHT_FOV)
+        lens.set_near_far(0.1, FLASHLIGHT_RANGE)
+        self.flashlight_light._light.set_attenuation(Vec3(*FLASHLIGHT_ATTENUATION))
+        self.flashlight_light._light.set_exponent(FLASHLIGHT_EXPONENT)
+        self.flashlight_light._light.set_max_distance(FLASHLIGHT_RANGE)
+        self.flashlight_light._light.set_shadow_caster(
+            FLASHLIGHT_SHADOWS, FLASHLIGHT_SHADOW_RESOLUTION, FLASHLIGHT_SHADOW_RESOLUTION)
         self.cursor.color = color.white
 
         self.hud.refresh_inventory(self)
@@ -269,5 +279,5 @@ class HorrorPlayer(FirstPersonController):
         self.flashlight_light.world_position = camera.world_position
         self.flashlight_light.world_rotation = camera.world_rotation
         self.flashlight_light.color = (
-            color.rgb(0.95, 0.90, 0.78) if enabled else color.rgb(0, 0, 0)
+            color.rgb(*FLASHLIGHT_COLOR) if enabled else color.rgb(0, 0, 0)
         )

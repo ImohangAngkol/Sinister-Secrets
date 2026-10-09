@@ -5,7 +5,9 @@ class Room(Entity):
     """Room metadata and inexpensive geometric furniture; no imported assets."""
 
     def __init__(self, definition, **kwargs):
-        super().__init__(name=definition["id"], **kwargs)
+        # Even model-less containers inherit Ursina's default unlit shader.
+        # Clear it so floors and furniture inherit House's generated lighting.
+        super().__init__(name=definition["id"], shader=None, **kwargs)
         self.room_id = definition["id"]
         self.title = definition["name"]
         self.room_bounds = definition["bounds"]
@@ -35,7 +37,7 @@ class Room(Entity):
                     "clock": (0.4, 2.2, 0.4), "plant": (0.8, 1.3, 0.8),
                     "steps": (1.8, 0.5, 2.1)}
         width, height, depth = definition.get("size", defaults[kind])
-        prop = Entity(parent=self, name=kind, position=definition["position"],
+        prop = Entity(parent=self, name=kind, shader=None, position=definition["position"],
                       rotation_y=definition.get("rotation", 0))
         # One bounding collider per furniture assembly. Decorative legs and
         # cushions do not multiply traversal cost or create navigable traps.
