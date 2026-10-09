@@ -9,6 +9,7 @@ app = Ursina(
     borderless=False,
     fullscreen=False,
     editor_ui_enabled=False,
+    development_mode=False,
 )
 
 window.title = WINDOW_TITLE

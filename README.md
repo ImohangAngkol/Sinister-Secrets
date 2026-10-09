@@ -14,7 +14,9 @@ Python/Ursina first-person horror prototype.
 - U then Enter - Confirm use of the selected stored battery; Backspace cancels
 - 0-9 / Backspace / Enter - Enter, erase, and submit a lock combination
 - R - Restart after death/win or during a staged catch
-- Esc - Close an open inventory/note/lock screen; quit when no screen is open
+- Esc - Close inventory/note/lock screen first; otherwise pause/resume. On an end screen, return to the main menu.
+- Menu Up/Down or Tab - Select; Enter or mouse click - Confirm
+- Settings Left/Right - Adjust; Apply and Back saves; Esc cancels
 
 ## Prototype 0.1
 
@@ -46,6 +48,178 @@ into inventory and used deliberately. Read the living-room note to begin the
 fuse, combination, and crowbar sequence below. The yellow exit key remains
 inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
 with E, then walk through the opening to escape. The ghost uses placeholder geometry.
+
+## Milestone 6: menus, pause, preferences, and lifecycle
+
+Launch now displays **Start Game, Settings, Controls, Quit Game**. No house,
+player, ghost, resource timers, or paranormal director exists before Start Game.
+Escape during gameplay opens **Resume, Settings, Restart Game, Return to Main
+Menu, Quit Game**. An open inventory/note/combination screen consumes Escape
+first; its existing gameplay-continues policy is preserved. Inventory keeps the
+mouse captured; menus release it. End screens offer Restart and Main Menu,
+with R and Escape shortcuts. Escape on the main menu does not quit.
+
+Pause uses Ursina's application pause flag, freezing entity updates, input, door
+animations, resource/hiding timers, horror events, and timed HUD callbacks.
+Focus suspension is independent of the current menu: regaining focus cannot
+resume an already paused session or close settings. Resume clears held keys and
+mouse velocity and discards the first frame's delta. The HUD callback remains
+paused until after Ursina's sequence-before-entity update pass, preventing it
+from expiring on that first frame. Restart and returning to the main menu use
+the existing scene cleanup, removing lights, temporary effects, cinematic
+geometry, and actors. New games reset inventory, puzzle gates, ghost memory,
+hiding state, and seeded event pacing.
+
+### Settings and local persistence
+
+Use Up/Down to select; Left/Right or Enter/click changes a value. Apply and Back
+validates and saves; Escape or Cancel discards edits. Preferences are stored
+atomically in `game/data/user_preferences.json`, ignored by Git. The path is
+resolved relative to the project, independent of the working directory. The
+file stores preferences only, with no save/checkpoint or progress. Missing files
+use defaults. Corrupt, incompatible, or invalid files use defaults and display
+a settings warning without overwriting the file. Failed writes leave settings
+open and preserve the last configuration. Tests use temporary or memory-only
+preferences and do not overwrite a player's preferences.
+
+| Setting | Default and choices | Application |
+| --- | --- | --- |
+| Mouse sensitivity | 1x; 0.25-3x | Current session; scales the original 40/40 sensitivity |
+| Visibility brightness | 1x; 0.5-2x | Current session; scales ambient/fill, preserving beam intensity, fog, and shaders |
+| Flashlight shadows * | Low/512; Off, Low/512, High/1024 | Next new game or Restart; Off permits light through walls |
+| Horror frequency | 1x; 0, 0.5, 1, 1.5, 2, 3 | Current session; 0 disables events; remaining schedule is rescaled safely |
+| Reduced horror flicker | On; On/Off | Current session; smooth paranormal dimming; battery flicker retains its existing time-based behavior |
+| Reduced camera shake | Off; On/Off | Next catch in the current session; reduces shake to 15% |
+| Jumpscare intensity | 0.65; 0-1 | Next catch; 0 removes approach/shake/darkening but still ends the caught game |
+| Ghost difficulty * | Standard; Relaxed, Standard, Hard | Next new game; speed/detection multipliers 0.85/0.8, 1/1, 1.1/1.2 |
+| FPS cap | Unlimited; Unlimited, 30, 60, 120 | Immediately; Panda's limited clock, subject to GPU load/vsync |
+
+The two next-game settings are marked with an asterisk. Settings displays a
+pending-change notice when the current session still uses older shadow/difficulty
+values. No ghost sight, collision, route-recovery, or five-state behavior is
+replaced. Applying visibility/accessibility changes restores an active paranormal
+effect before applying the new light values.
+
+### UI and balance review
+
+Main/pause/settings/controls/end screens share dark panels, muted highlights,
+spacing, and keyboard selection. End screens include clickable actions.
+Inventory/puzzle text uses the same palette. Modal panels hide the ordinary
+objective/startup message; new warnings appear below the panel instead of
+covering item or puzzle text. Native screenshots cover all six requested UI
+screens at 640x480, 960x720, and 1280x720.
+
+Existing balance defaults are unchanged. All base values remain in
+`game/settings.py`; the menu adds session difficulty and horror/accessibility
+choices. At 3.5 charge/second, initial 65 charge plus the one 35-charge battery
+provides **about 28.6 seconds total illumination**, requiring deliberate flashlight
+use. A full sprint lasts about **4.55 seconds** (100/22), with approximately
+**7.67 seconds** recovery from empty (1-second delay plus 100/15). Standard ghost
+patrol/chase remains 2.1/5.9 units/second versus player walk/sprint 5/8. Hiding
+retains its 12-second quiet period and 3-second breathing pulses. Horror pacing
+retains its 30-second initial quiet period and 28-48-second cooldown at 1x; the
+catch remains 1.8 seconds at 0.65 intensity. Human flashlight-supply and pursuit
+balance testing is required before changing these defaults.
+
+### Validation and evidence
+
+Commands from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q main.py game
+.\.venv\Scripts\python.exe -m unittest discover -s game/tests -v
+.\.venv\Scripts\python.exe -m game.tests.windowed_smoke
+git diff --check
+```
+
+The clean `main` baseline `0935e05` passed its 109 tests before changes.
+All 109 test methods are retained; their shared fixture explicitly starts a
+session after the new launch menu and consumes its first frame. Milestone 6
+adds 20 real-engine regressions and 6 temporary-file preferences tests, covering
+menu input, single-session creation, pause-safe simulation and callbacks,
+focus/cursor transitions, setting validation/application/persistence failures,
+new-game/restart/effect cleanup, resizing, progression preservation, collision
+sweeps at each difficulty, modal warnings, clock limiting, and Quit dispatch.
+
+Final validation: **135 tests passed in 132.930 seconds** (109 preserved plus
+26 new); compilation and `git diff --check` passed. Native screenshot inspection
+confirmed readable panels at all three sizes and the corrected modal HUD layout.
+On this RTX 3050 Laptop GPU, startup gameplay task stepping measured 6.95 ms
+median / 11.09 ms p95. With flashlight on and ghost frozen, cabinet-event checks
+including an explicit second render measured 15.60 / 20.16 ms; quiet checks
+15.07 / 21.44 ms. These are scripted measurements, not low-spec benchmarks.
+All 75 original settings constants remain unchanged.
+
+Modified existing files: `.gitignore`, `README.md`, `main.py`,
+`game/game_manager.py`, `game/settings.py`, `game/ghost/ghost_ai.py`,
+`game/ghost/jumpscare.py`, `game/systems/horror_manager.py`,
+`game/ui/main_menu.py`, `game/ui/pause_menu.py`, `game/ui/game_over.py`,
+`game/ui/hud.py`, `game/ui/inventory_ui.py`, `game/tests/test_prototype.py`,
+`game/tests/windowed_smoke.py`. Created: `game/tests/test_settings.py`.
+No existing folders/modules were renamed or removed; no assets or levels added.
+
+The native harness runs actual `main.py`, injects engine keyboard input, and
+moves the native pointer to test the menu's actual mouse ray. It checks all
+requested resolutions, menu/pause/settings/inventory/end transitions, six R
+restarts, live wardrobe inspection/catch, and **two full puzzle escapes separated
+by victory -> main menu -> new game**, with a pause after fuse installation.
+The ghost is disabled only for deterministic puzzle traversal and visual
+fixtures; live sensing/inspection/catch is checked separately. This is scripted
+verification, not a human playthrough. Preferences persistence is tested using
+actual temporary files; the native fixture uses memory-only defaults.
+
+Generated evidence (ignored screenshots, not imported game assets):
+
+- [Main menu](game/tests/render_menu_main_1280x720.png)
+- [Pause](game/tests/render_menu_pause_1280x720.png)
+- [Settings](game/tests/render_menu_settings_1280x720.png)
+- [Controls](game/tests/render_menu_controls_1280x720.png)
+- [Inventory](game/tests/render_menu_inventory_1280x720.png)
+- [Game over](game/tests/render_menu_game_over_1280x720.png)
+- Compact and intermediate variants use `_640x480.png` / `_960x720.png`.
+- Existing `render_progression_*`, `render_horror_*`, `render_lighting_*` and
+  house overview evidence are refreshed by the native run.
+
+Windows supplies a native GPU window/offscreen buffer; no Xvfb display is used.
+Physical Alt-Tab still needs manual testing: the window manager refused the
+programmatic focus-loss request, so the harness reports and uses a direct focus
+callback fallback, then pins focus for deterministic input. Missing bundled
+Ursina icon/PNG profile/framebuffer warnings are nonfatal; no external icon or
+assets are added. Long-session memory profiling and low-spec hardware testing
+remain unverified. Disabling flashlight shadows retains the documented light
+leak approximation; reduced horror flicker does not remove low-battery flicker.
+
+### Manual acceptance checks and Milestone 7
+
+1. Run `.\.venv\Scripts\python.exe main.py`. Verify the launch menu and visible
+   cursor; leave it open for a minute. Open Controls and Settings using mouse and
+   arrows/Enter. Escape returns without quitting or applying edits.
+2. Change sensitivity/brightness, choose Apply and Back, quit/relaunch and check
+   persistence. Shadow/difficulty changes should remain pending in an existing
+   paused session until Restart/New Game. Try FPS caps and visibility choices.
+3. Start Game. Check WASD/look/Shift/Ctrl/collisions and E/F flashlight pickup and
+   toggle. With the beam on, pause for 30 seconds: battery/stamina, ghost, door
+   animation and horror effects must not advance. Resume with no movement jump.
+4. Open Tab inventory or a note/combination interface. Escape closes it; the next
+   Escape pauses. Readability should hold at 640x480, 960x720, and 1280x720.
+   Alt-Tab while playing, paused, and editing settings; refocus must retain the
+   state, release/capture the pointer appropriately, and clear held movement.
+5. Complete the existing clue chain: living-room note -> storage fuse -> kitchen
+   fuse box -> kitchen tally -> dining lockbox -> bedroom boards -> exit key -> E on
+   north exit -> walk through. Battery use remains U then Enter in inventory.
+   Keep the ghost active for this human challenge and test alternate routes.
+6. After victory choose Main Menu, then Start Game and repeat. Seek a legitimate
+   ghost catch; R should restart during/after it. Test Pause -> Restart and Pause
+   -> Return to Main Menu -> Start. Check fresh items/puzzles, one ghost, and no
+   remaining dimming, apparition, cinematic overlay, or unexpected input.
+7. Test Quit from both menus. Report hardware, settings, battery usage, deaths,
+   puzzle completion times, and any visual/input issues.
+
+For Milestone 7, prioritize human balance measurements (especially battery
+supply), longer repeated-session profiling and low-spec shadow performance,
+control rebinding/text scaling and broader flicker accessibility, then approved
+sound/asset integration and additional authored story content. Checkpoints
+should follow an explicit persistence design; none are implemented here.
 
 ## Milestone 5: paranormal events and staged catches
 

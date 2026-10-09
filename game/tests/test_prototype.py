@@ -18,6 +18,7 @@ from PIL import Image, ImageStat
 from ursina import Entity, Ursina, Vec3, application, camera, color, destroy, held_keys, mouse, scene, time
 
 from game.game_manager import GameManager
+from game.settings import Preferences
 from game.ghost.ghost_navigation import astar
 from game.ghost.ghost_hearing import can_hear_player
 from game.ghost.ghost_states import GhostState
@@ -67,7 +68,10 @@ class PrototypeTests(unittest.TestCase):
         held_keys.clear()
         mouse.velocity = Vec3(0, 0, 0)
         time.dt = time.dt_unscaled = 1 / 60
-        self.manager = GameManager()
+        self.manager = GameManager(preferences=Preferences(path=None))
+        self.manager.start_game()
+        self.manager.update()  # Consume the first clean session frame.
+        time.dt = time.dt_unscaled = 1 / 60
         self.player = self.manager.scene_manager.player
         self.house = self.manager.scene_manager.house
         self.ghost = self.manager.scene_manager.ghost
@@ -107,6 +111,324 @@ class PrototypeTests(unittest.TestCase):
         horror.next_allowed = 0
         horror.director.tension = .5
         return horror
+
+    def test_menu_launch_has_no_gameplay_session(self):
+        self.manager.return_to_menu()
+        self.assertEqual(self.manager.state, 'menu')
+        self.assertIsNone(self.manager.scene_manager)
+        self.assertTrue(application.paused)
+        self.assertFalse(mouse.locked)
+        self.assertFalse(self.manager.hud.enabled)
+        for _ in range(10):
+            time.dt = .25
+            self.app.taskMgr.step()
+        self.assertIsNone(self.manager.scene_manager)
+        self.assertFalse(any(not e.is_empty() and e.enabled and e.__class__.__name__ == 'Ghost'
+                             for e in scene.entities))
+        self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib), None)
+
+    def test_menu_keyboard_controls_and_start_create_one_session(self):
+        self.manager.return_to_menu()
+        for key in ('down arrow', 'down arrow', 'enter'):
+            self.app.input(key, is_raw=True)
+        self.assertEqual(self.manager.state, 'controls')
+        self.app.input('escape', is_raw=True)
+        self.assertEqual(self.manager.state, 'menu')
+        self.manager.main_menu.selected = 0
+        self.app.input('enter', is_raw=True)
+        current = self.manager.scene_manager
+        self.app.input('enter', is_raw=True)
+        self.assertFalse(self.manager.start_game())
+        self.assertIs(self.manager.scene_manager, current)
+        self.assertTrue(mouse.locked)
+        self.assertFalse(application.paused)
+
+    def test_menu_mouse_routes_to_selected_row_without_duplicate_actions(self):
+        self.manager.return_to_menu()
+        with patch.object(mouse, 'hovered_entity', self.manager.main_menu.rows[1][0]):
+            self.app.input('left mouse down', is_raw=True)
+        self.assertEqual(self.manager.state, 'settings')
+        self.assertIsNone(self.manager.scene_manager)
+        self.app.input('escape', is_raw=True)
+        with patch.object(mouse, 'hovered_entity', self.manager.main_menu.rows[0][0]):
+            self.app.input('left mouse down', is_raw=True)
+        current = self.manager.scene_manager
+        self.assertEqual(self.manager.state, 'playing')
+        self.assertIsNotNone(current)
+        self.assertFalse(self.manager.start_game())
+
+    def test_menu_pause_freezes_all_simulation_and_callbacks(self):
+        horror = self.prepare_horror()
+        self.assertTrue(horror.start_event('power_dip'))
+        self.player.toggle_flashlight()
+        self.player.stats.stamina = 40
+        from game.world.door import Door
+        door = Door(parent=self.house, position=(15,0,-14))
+        door.open()
+        self.ghost.enabled = True
+        sequence = self.manager.hud.message_sequence
+        def snapshot():
+            return (tuple(self.player.position), self.player.stats.battery, self.player.stats.stamina,
+                    self.player.stats.elapsed_time, tuple(self.ghost.position), self.ghost.ai.memory_age,
+                    self.ghost.ai.repath_time, horror.clock, horror.active['elapsed'],
+                    door.opening_time, sequence.t)
+        self.app.input('escape', is_raw=True)
+        before = snapshot()
+        self.assertEqual(self.manager.state, 'paused')
+        self.assertFalse(mouse.locked)
+        for _ in range(20):
+            time.dt = time.dt_unscaled = .25
+            self.app.input('w', is_raw=True)
+            self.app.input('f', is_raw=True)
+            self.app.input('e', is_raw=True)
+            self.app.taskMgr.step()
+        self.assertEqual(snapshot(), before)
+        self.app.input('escape', is_raw=True)
+        time.dt = 9  # The first resumed entity frame must discard stale delta.
+        self.manager.update()
+        self.assertEqual(time.dt, 0)
+        self.assertEqual(snapshot(), before)
+        time.dt = time.dt_unscaled = 1/60
+        self.app.taskMgr.step()
+        self.assertLess(self.player.stats.battery, before[1])
+        time.dt = time.dt_unscaled = 1/60
+        self.app.taskMgr.step()
+        self.assertGreater(horror.clock, before[7])
+        self.assertTrue(mouse.locked)
+
+    def test_menu_escape_closes_inventory_and_combination_before_pausing(self):
+        for mode in ('inventory', 'combination'):
+            self.manager.hud.panel._open(self.player, mode)
+            self.app.input('escape', is_raw=True)
+            self.assertFalse(self.manager.hud.panel.active)
+            self.assertEqual(self.manager.state, 'playing')
+            self.assertFalse(application.paused)
+        self.app.input('escape', is_raw=True)
+        self.assertEqual(self.manager.state, 'paused')
+
+    def test_menu_focus_regain_preserves_pause_and_settings(self):
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.manager.set_focus(False)
+        self.manager.input('escape')
+        self.assertEqual(self.manager.state, 'settings')
+        self.manager.set_focus(True)
+        self.assertTrue(application.paused)
+        self.assertFalse(mouse.locked)
+        self.manager.input('escape')
+        self.assertEqual(self.manager.state, 'paused')
+        self.manager.input('escape')
+        self.assertEqual(self.manager.state, 'playing')
+        self.assertTrue(mouse.locked)
+
+    def test_menu_settings_cancel_does_not_apply_and_keyboard_cycles(self):
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.app.input('right arrow', is_raw=True)
+        self.assertEqual(self.manager.settings_menu.draft['mouse_sensitivity'], 1.25)
+        self.app.input('escape', is_raw=True)
+        self.assertEqual(self.manager.preferences.values['mouse_sensitivity'], 1)
+        self.assertEqual(tuple(self.player.mouse_sensitivity), (40,40))
+        self.assertEqual(self.manager.state, 'paused')
+        self.manager.open_settings()
+        self.assertEqual(self.manager.settings_menu.draft['mouse_sensitivity'], 1)
+
+    def test_menu_live_settings_restore_effects_and_keep_flashlight_shader(self):
+        horror = self.prepare_horror()
+        horror.start_event('power_dip')
+        horror.update(1)
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.manager.settings_menu.draft.update(mouse_sensitivity=1.5, brightness=1.5,
+                                               horror_frequency=0, reduced_flicker=False,
+                                               reduced_shake=True, jumpscare_intensity=.25)
+        self.assertTrue(self.manager.apply_settings())
+        self.assertIsNone(horror.active)
+        self.assertEqual(horror.frequency, 0)
+        self.assertFalse(horror.reduced_flicker)
+        self.assertEqual(tuple(self.player.mouse_sensitivity), (60,60))
+        self.assertAlmostEqual(horror.lights[0].color.r, .15)
+        self.assertEqual(self.player.flashlight_light._light.get_lens().get_fov().x, FLASHLIGHT_FOV)
+        self.manager.resume_game()
+        self.ghost.jumpscare.trigger()
+        self.assertEqual(self.ghost.jumpscare.intensity, .25)
+        self.assertTrue(self.ghost.jumpscare.preference_reduced_shake)
+
+    def test_menu_shadow_and_difficulty_apply_only_to_new_sessions(self):
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.manager.settings_menu.draft.update(shadow_quality='high', ghost_difficulty='hard')
+        self.manager.apply_settings()
+        self.assertEqual(self.ghost.ai.speed_multiplier, 1)
+        self.assertEqual(self.player.flashlight_light._light.get_shadow_buffer_size().x, 512)
+        self.manager.restart_game()
+        player = self.manager.scene_manager.player
+        ghost = self.manager.scene_manager.ghost
+        self.assertEqual(player.flashlight_light._light.get_shadow_buffer_size().x, 1024)
+        self.assertEqual(ghost.ai.speed_multiplier, 1.1)
+        self.assertEqual(ghost.ai.detection_multiplier, 1.2)
+
+    def test_menu_save_failure_keeps_settings_screen_and_preferences(self):
+        self.manager.pause_game()
+        self.manager.open_settings()
+        self.manager.settings_menu.draft['brightness'] = 2
+        with patch.object(self.manager.preferences, 'save', side_effect=PermissionError()):
+            self.assertFalse(self.manager.apply_settings())
+        self.assertEqual(self.manager.state, 'settings')
+        self.assertEqual(self.manager.preferences.values['brightness'], 1)
+        self.assertIn('Could not save', self.manager.settings_menu.status.text)
+
+    def test_menu_new_games_cleanup_entities_lights_timers_and_handlers(self):
+        from collections import Counter
+        self.app.taskMgr.step()
+        self.app.taskMgr.step()
+        baseline = (len(scene.entities), len(scene.collidables), len(application.sequences))
+        names = Counter(e.name for e in scene.entities)
+        for index in range(6):
+            current = self.manager.scene_manager
+            current.player.inventory.add('fuse')
+            current.player.progression.install_fuse()
+            self.manager.pause_game()
+            self.manager.return_to_menu()
+            self.assertTrue(current.house.is_empty())
+            self.assertFalse(self.manager.hud.panel.active)
+            self.assertIsNone(self.manager.scene_manager)
+            self.app.input('enter', is_raw=True)
+            self.manager.scene_manager.ghost.enabled = False
+            self.app.taskMgr.step()
+            self.app.taskMgr.step()
+            self.assertFalse(self.manager.scene_manager.player.inventory.quantities)
+            self.assertFalse(self.manager.scene_manager.player.progression.power_restored)
+            self.assertEqual(Counter(e.name for e in scene.entities), names)
+            self.assertEqual((len(scene.entities), len(scene.collidables), len(application.sequences)), baseline)
+            self.assertEqual(sum(not e.is_empty() and isinstance(e, GameManager) for e in scene.entities), 1)
+            self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib).get_num_on_lights(), 3)
+
+    def test_menu_terminal_states_return_to_menu_and_restart(self):
+        for terminal in (self.manager.game_over, self.manager.win_game):
+            terminal()
+            self.assertTrue(application.paused)
+            self.assertTrue(self.manager.end_screen.enabled)
+            self.manager.input('escape')
+            self.assertIsNone(self.manager.scene_manager)
+            self.assertFalse(self.manager.end_screen.enabled)
+            self.manager.input('enter')
+            self.assertEqual(self.manager.state, 'playing')
+            self.manager.game_over()
+            self.manager.input('r')
+            self.assertEqual(self.manager.state, 'playing')
+
+    def test_menu_return_cancels_paranormal_and_jumpscare_geometry(self):
+        horror = self.prepare_horror('living')
+        horror.start_event('cabinet_creak')
+        temporary = horror.active['temporary'][0]
+        self.manager.pause_game()
+        self.manager.return_to_menu()
+        self.assertTrue(temporary.is_empty())
+        self.assertIsNone(horror.active)
+        self.manager.start_game()
+        jump = self.manager.scene_manager.ghost.jumpscare
+        jump.trigger()
+        proxy, overlay = jump.proxy, jump.overlay
+        self.manager.return_to_menu()
+        self.assertTrue(proxy.is_empty())
+        self.assertTrue(overlay.is_empty())
+        self.assertFalse(jump.active)
+
+    def test_menu_resizing_fits_all_screens_and_preserves_selection(self):
+        for width, height in ((640,480),(960,720),(1280,720)):
+            aspect = width/height
+            for screen in set(self.manager.screens.values()):
+                screen.resize(aspect)
+                self.assertAlmostEqual(screen.background.scale_x, aspect)
+                self.assertLessEqual(1.14*screen.content.scale_x, aspect-.09)
+                self.assertLessEqual(max(abs(row.y)+row.scale_y/2 for row,_ in screen.rows), .5)
+            self.manager.settings_menu.selected = 4
+            self.manager.settings_menu.resize(aspect)
+            self.assertEqual(self.manager.settings_menu.selected, 4)
+
+    def test_menu_pause_preserves_progression_inventory_and_hiding_timer(self):
+        self.player.inventory.add('fuse')
+        self.player.progression.install_fuse()
+        spot = self.house.hiding_spots[0]
+        self.player.position = Vec3(spot.approach)
+        self.assertTrue(self.player.enter_hiding(spot))
+        self.manager.pause_game()
+        for _ in range(30):
+            time.dt = .5
+            self.app.taskMgr.step()
+        self.assertEqual(self.player._hide_elapsed, 0)
+        self.assertTrue(self.player.hidden)
+        self.manager.resume_game()
+        self.assertTrue(self.player.progression.power_restored)
+        self.assertTrue(self.player.leave_hiding())
+        code = self.house.level.house['progression']['combination']
+        self.assertTrue(self.player.progression.try_combination(code))
+        self.assertTrue(self.player.progression.remove_boards())
+        self.assertEqual(self.player.inventory.count('crowbar'), 1)
+
+    def test_menu_difficulty_preserves_wall_sweeps_and_five_states(self):
+        from game.settings import GHOST_DIFFICULTY
+        self.ghost.position = Vec3(0,0,-8)
+        self.player.position = Vec3(5,0,-8)
+        for speed, detection in GHOST_DIFFICULTY.values():
+            self.ghost.ai.speed_multiplier, self.ghost.ai.detection_multiplier = speed, detection
+            self.ghost.position = Vec3(0,0,-8)
+            time.dt = 1
+            self.ghost.ai._move_directly_toward_player()
+            self.assertLess(self.ghost.x, 2)
+        self.assertEqual({state.name for state in GhostState},
+                         {'PATROL','INVESTIGATE','SEARCH','CHASE','JUMPSCARE'})
+
+    def test_menu_fps_cap_uses_clock_limiter_and_unlimited_restores(self):
+        from panda3d.core import ClockObject
+        clock = ClockObject.get_global_clock()
+        try:
+            for cap in (30,60,120):
+                self.manager.preferences.values['fps_cap'] = cap
+                self.manager._apply_fps_cap()
+                self.assertEqual(clock.get_mode(), ClockObject.MLimited)
+                clock.tick()  # Flush time spent constructing the scene before measuring.
+                clock.tick()
+                self.assertAlmostEqual(clock.get_dt(), 1/cap, delta=.5/cap)
+        finally:
+            self.manager.preferences.values['fps_cap'] = 0
+            self.manager._apply_fps_cap()
+        self.assertEqual(clock.get_mode(), ClockObject.MNormal)
+
+    def test_menu_modal_hud_does_not_cover_inventory_and_puzzle_text(self):
+        self.manager.input('tab')
+        self.assertFalse(self.manager.hud.objective.enabled)
+        self.assertFalse(self.manager.hud.message.enabled)
+        self.manager.hud.show_message('The ghost is checking this wardrobe. E to leave!')
+        self.assertTrue(self.manager.hud.message.enabled)
+        self.assertLess(self.manager.hud.message.y, -.41)
+        self.manager.input('escape')
+        self.assertTrue(self.manager.hud.objective.enabled)
+        self.assertAlmostEqual(self.manager.hud.message.y, .28)
+
+    def test_menu_first_resumed_engine_frame_does_not_expire_hud_callback(self):
+        sequence = self.manager.hud.message_sequence
+        self.manager.pause_game()
+        self.manager.resume_game()
+        time.dt = time.dt_unscaled = 9
+        self.app.taskMgr.step()
+        self.assertEqual(sequence.t, 0)
+        self.assertTrue(self.manager.hud.message.text)
+        self.assertEqual(self.player.stats.elapsed_time, 0)
+        time.dt = time.dt_unscaled = 1/60
+        self.app.taskMgr.step()
+        self.assertAlmostEqual(sequence.t, 1/60)
+
+    def test_menu_quit_button_disposes_session_before_quitting(self):
+        current = self.manager.scene_manager
+        self.manager.pause_game()
+        self.manager.pause_menu.selected = 4
+        with patch('game.game_manager.application.quit') as quit_call:
+            self.app.input('enter', is_raw=True)
+            quit_call.assert_called_once_with()
+        self.assertIsNone(self.manager.scene_manager)
+        self.assertTrue(current.house.is_empty())
 
     def test_horror_event_cooldown_and_single_active_effect(self):
         horror = self.prepare_horror()

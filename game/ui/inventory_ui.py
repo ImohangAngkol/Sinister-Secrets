@@ -1,5 +1,6 @@
 import textwrap
 from ursina import Entity, Text, Vec3, camera, color, held_keys, mouse
+from game.ui.main_menu import TEXT_COLOR, ACCENT_COLOR
 
 
 class InventoryUI(Text):
@@ -21,7 +22,7 @@ class InventoryUI(Text):
 
             scale=1.05,
 
-            color=color.white,
+            color=TEXT_COLOR,
         )
         self.create_background(padding=0.025, color=color.black66)
 
@@ -69,10 +70,10 @@ class GameplayPanel(Entity):
         self.digits = ""
         self.status = ""
         Entity(parent=self, model="quad", scale=(1.18, .82), color=color.rgba32(9, 12, 17, 246), z=.01)
-        self.title = Text(parent=self, origin=(-.5,.5), x=-.53, y=.34, scale=1.2)
-        self.body = Text(parent=self, origin=(-.5,.5), x=-.53, y=.23, scale=.95)
-        self.detail = Text(parent=self, origin=(-.5,.5), x=-.53, y=-.04, scale=.88)
-        self.footer = Text(parent=self, origin=(-.5,.5), x=-.53, y=-.32, scale=.82)
+        self.title = Text(parent=self, origin=(-.5,.5), x=-.53, y=.34, scale=1.2, color=TEXT_COLOR)
+        self.body = Text(parent=self, origin=(-.5,.5), x=-.53, y=.23, scale=.95, color=TEXT_COLOR)
+        self.detail = Text(parent=self, origin=(-.5,.5), x=-.53, y=-.04, scale=.88, color=TEXT_COLOR)
+        self.footer = Text(parent=self, origin=(-.5,.5), x=-.53, y=-.32, scale=.82, color=ACCENT_COLOR)
 
     @property
     def active(self):
@@ -92,7 +93,10 @@ class GameplayPanel(Entity):
         mouse.velocity = Vec3(0, 0, 0)
         player.cursor.enabled = False
         player.hud.set_prompt("")
+        player.hud.objective.enabled = False
+        player.hud.message.enabled = False
         self.layout(camera.aspect_ratio)
+        player.hud.layout(camera.aspect_ratio)
 
     def open_inventory(self, player):
         self._open(player, "inventory")
@@ -120,6 +124,10 @@ class GameplayPanel(Entity):
         mouse.velocity = Vec3(0, 0, 0)
         if self.player and self.player.enabled:
             self.player.cursor.enabled = True
+        if self.player:
+            self.player.hud.objective.enabled = True
+            self.player.hud.message.enabled = bool(self.player.hud.message.text)
+            self.player.hud.layout(camera.aspect_ratio)
         self.player = None
 
     def item_ids(self):

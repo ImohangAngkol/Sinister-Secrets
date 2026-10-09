@@ -25,6 +25,8 @@ class GhostAI:
         self.hiding_spots = hiding_spots
         self.hud, self.jumpscare = hud, jumpscare
         self.state = GhostState.PATROL
+        self.speed_multiplier = 1.0
+        self.detection_multiplier = 1.0
         self.navigation = GhostNavigation(ghost, nav_nodes, graph, collision_root, player)
         self.last_known_player_node = None
         self.last_known_player_position = None
@@ -85,7 +87,7 @@ class GhostAI:
             self.lost_sight_time = 0
             proximity = 1 - min(1, distance_xz(self.ghost.world_position, self.player.world_position) / GHOST_VISION_DISTANCE)
             self.detection = min(1, self.detection + dt * visibility_factor(self.player)
-                                 * (0.45 + 0.55 * proximity) / GHOST_DETECTION_SECONDS)
+                                 * self.detection_multiplier * (0.45 + 0.55 * proximity) / GHOST_DETECTION_SECONDS)
             if self.detection >= 1 and self.state != GhostState.CHASE:
                 self.navigation.clear()
                 self.inspection_target = self.suspected_hiding_spot = None
@@ -151,14 +153,14 @@ class GhostAI:
 
     def _run_state(self, sees_player):
         if self.state == GhostState.PATROL:
-            self.navigation.follow_path(GHOST_PATROL_SPEED)
+            self.navigation.follow_path(GHOST_PATROL_SPEED * self.speed_multiplier)
             if self.navigation.path_finished():
                 self._choose_random_patrol_target()
         elif self.state == GhostState.INVESTIGATE:
             if self.navigation.blocked and self.navigation.path_finished():
                 self._recover_without_route()
                 return
-            self.navigation.follow_path(GHOST_INVESTIGATE_SPEED)
+            self.navigation.follow_path(GHOST_INVESTIGATE_SPEED * self.speed_multiplier)
             if self.navigation.path_finished():
                 self._start_search()
         elif self.state == GhostState.CHASE:
@@ -175,7 +177,7 @@ class GhostAI:
                         self._recover_without_route()
                         return
                     self.repath_time = 0.3
-                self.navigation.follow_path(GHOST_CHASE_SPEED)
+                self.navigation.follow_path(GHOST_CHASE_SPEED * self.speed_multiplier)
                 if not sees_player and self.navigation.path_finished():
                     self._start_search()
         elif self.state == GhostState.SEARCH:
@@ -193,7 +195,7 @@ class GhostAI:
             if self.inspection_target is not None:
                 self._inspect_hiding_spot()
             else:
-                self.navigation.follow_path(GHOST_SEARCH_SPEED)
+                self.navigation.follow_path(GHOST_SEARCH_SPEED * self.speed_multiplier)
                 if self.navigation.path_finished():
                     self._select_search_target()
 
@@ -244,7 +246,7 @@ class GhostAI:
 
     def _inspect_hiding_spot(self):
         spot = self.inspection_target
-        self.navigation.follow_path(GHOST_SEARCH_SPEED)
+        self.navigation.follow_path(GHOST_SEARCH_SPEED * self.speed_multiplier)
         if not self.navigation.path_finished():
             return
         if not self._inspection_clear(spot):
@@ -265,7 +267,7 @@ class GhostAI:
             self._select_search_target()
 
     def _move_directly_toward_player(self):
-        self.navigation.move_toward(self.player.world_position, GHOST_CHASE_SPEED)
+        self.navigation.move_toward(self.player.world_position, GHOST_CHASE_SPEED * self.speed_multiplier)
         self.navigation.target_position = Vec3(self.player.world_position)
 
     def _choose_random_patrol_target(self):

@@ -25,7 +25,7 @@ class Jumpscare:
         self.active = True
         self.elapsed = 0
         self.duration = max(.1,settings.JUMPSCARE_SECONDS)
-        self.intensity = max(0,min(1,settings.JUMPSCARE_INTENSITY))
+        self.intensity = max(0,min(1,getattr(self, 'preference_intensity', settings.JUMPSCARE_INTENSITY)))
         self.on_finished = on_finished
         self.saved_position = Vec3(camera.world_position)
         self.saved_rotation = Vec3(camera.world_rotation)
@@ -62,7 +62,7 @@ class Jumpscare:
         approach = approach*approach*(3-2*approach)
         self.proxy.z = 2.4-1.1*self.intensity*approach
         shake = settings.JUMPSCARE_SHAKE_DEGREES*self.intensity
-        if settings.JUMPSCARE_REDUCED_SHAKE:
+        if getattr(self, 'preference_reduced_shake', settings.JUMPSCARE_REDUCED_SHAKE):
             shake *= .15
         camera.world_rotation = self.saved_rotation + Vec3(
             math.sin(self.elapsed*13)*shake,math.sin(self.elapsed*9)*shake*.5,0)

@@ -220,7 +220,7 @@ class HorrorManager:
         elapsed, duration, intensity = active['elapsed'],event.seconds,active['intensity']
         envelope = math.sin(math.pi*elapsed/duration)**2
         if event.category == 'lighting':
-            if not settings.HORROR_REDUCED_FLICKER and event.name != 'fill_failure':
+            if not getattr(self, 'reduced_flicker', settings.HORROR_REDUCED_FLICKER) and event.name != 'fill_failure':
                 envelope *= .75+.25*math.cos(2*math.pi*elapsed*.8)
             factor = 1-.55*intensity*envelope
             for entity, original in active['colors']:

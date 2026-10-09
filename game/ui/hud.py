@@ -52,7 +52,10 @@ class HUD(Entity):
         self.inventory_ui.x = -aspect / 2 + 0.03
         self.inventory_ui.scale = min(1.05, (aspect-.12)/max(self.inventory_ui.width,.001))
         self.ghost_state.x = aspect / 2 - 0.03
-        self.message.scale = min(1.15, (aspect - 0.08) / max(self.message.width, 0.001))
+        # Modal text owns the center. New warnings remain visible below it.
+        self.message.y = -.455 if self.panel.active else .28
+        self.message.scale = min(.9 if self.panel.active else 1.15,
+                                 (aspect - 0.08) / max(self.message.width, 0.001))
         self.objective.x = -aspect/2+.03
         self.objective.scale = min(.78, (aspect-.1)/max(self.objective.width,.001))
         self.panel.layout(aspect)

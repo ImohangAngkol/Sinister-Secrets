@@ -19,8 +19,12 @@ loadPrcFileData("", "audio-library-name null\nmodel-cache-dir\n")
 def verify_window(app):
     from ursina import Vec3, application, camera, held_keys, mouse, scene, time
     from game.game_manager import GameManager
+    from game.settings import Preferences
 
     manager = next(entity for entity in scene.entities if isinstance(entity, GameManager))
+    # Deterministic defaults without overwriting the player's local preferences.
+    manager.preferences = Preferences(path=None)
+    manager._apply_fps_cap()
 
     def frames(count=12):
         for _ in range(count):
@@ -53,6 +57,72 @@ def verify_window(app):
 
     try:
         frames(60)
+        assert manager.state == "menu" and manager.scene_manager is None
+        assert application.paused and not mouse.locked
+        manager.set_focus(True)
+        for width, height in ((640,480),(960,720),(1280,720)):
+            resize(width,height)
+            capture(f'render_menu_main_{width}x{height}.png')
+            app.input('down arrow',is_raw=True)
+            app.input('enter',is_raw=True)
+            assert manager.state=='settings' and manager.scene_manager is None
+            frames(2)
+            capture(f'render_menu_settings_{width}x{height}.png')
+            app.input('right arrow',is_raw=True)
+            assert manager.settings_menu.draft['mouse_sensitivity']==1.25
+            app.input('escape',is_raw=True)
+            assert manager.preferences.values['mouse_sensitivity']==1
+            app.input('down arrow',is_raw=True)
+            app.input('enter',is_raw=True)
+            assert manager.state=='controls'
+            frames(2)
+            capture(f'render_menu_controls_{width}x{height}.png')
+            app.input('escape',is_raw=True)
+            manager.main_menu.selected=0
+            app.input('enter',is_raw=True)
+            frames(2)
+            assert manager.state=='playing' and mouse.locked
+            current=manager.scene_manager
+            assert not manager.start_game()
+            app.input('escape',is_raw=True)
+            assert manager.state=='paused' and application.paused and not mouse.locked
+            battery=current.player.stats.battery
+            stamina=current.player.stats.stamina
+            clock=current.horror.clock
+            position=Vec3(current.ghost.position)
+            frames(30)
+            assert (current.player.stats.battery,current.player.stats.stamina,current.horror.clock)==(battery,stamina,clock)
+            assert current.ghost.position==position
+            capture(f'render_menu_pause_{width}x{height}.png')
+            manager.pause_menu.selected=1
+            app.input('enter',is_raw=True)
+            app.input('right arrow',is_raw=True)
+            manager.settings_menu.selected=9  # Apply and Back.
+            app.input('enter',is_raw=True)
+            assert manager.state=='paused' and tuple(current.player.mouse_sensitivity)==(50,50)
+            app.input('escape',is_raw=True)
+            assert manager.state=='playing' and mouse.locked
+            app.input('tab',is_raw=True)
+            frames(2)
+            capture(f'render_menu_inventory_{width}x{height}.png')
+            app.input('escape',is_raw=True)
+            assert manager.state=='playing'
+            manager.game_over()
+            frames(2)
+            capture(f'render_menu_game_over_{width}x{height}.png')
+            app.input('escape',is_raw=True)
+            assert manager.state=='menu' and manager.scene_manager is None and current.house.is_empty()
+            # Restore defaults in memory for the existing lighting/survival fixtures.
+            manager.preferences=Preferences(path=None)
+        # Exercise the native mouse ray rather than just assigning hovered_entity.
+        app.win.move_pointer(0,640,round(720*(.5-.12)))
+        frames(4)
+        assert mouse.hovered_entity==manager.main_menu.rows[0][0], mouse.hovered_entity
+        app.input('left mouse down',is_raw=True)
+        app.input('left mouse up',is_raw=True)
+        frames(2)
+        assert manager.state=='playing' and manager.scene_manager is not None
+        print('MENU_WINDOW_OK: three sizes; menu/settings/controls/pause/inventory/end; native mouse ray Start; resource freeze; resume; fresh-session cleanup')
         assert manager.state == "playing"
         assert mouse.locked
         capture("render_windowed.png")
@@ -328,88 +398,106 @@ def verify_window(app):
             app.input('e',is_raw=True)
             current_room = entry['room']
 
-        spawns = {entry['id']:entry for entry in house.level.spawns['pickups']}
-        props = {entry['id']:entry for entry in house.level.house['progression']['props']}
-        visit(spawns['foyer_flashlight'],house.pickups['foyer_flashlight'])
-        visit(spawns['living_instructions'],house.pickups['living_instructions'])
-        simulated_frames(2)
-        capture('render_progression_note.png')
-        app.input('escape',is_raw=True)
-        visit(spawns['storage_fuse'],house.pickups['storage_fuse'])
-        app.input('tab',is_raw=True)
-        assert manager.hud.panel.mode == 'inventory' and mouse.locked
-        simulated_frames(2)
-        capture('render_progression_inventory.png')
-        # Check compact screen layout in the actual window, not only arithmetic.
-        resize(640,480)
-        simulated_frames(8)
-        capture('render_progression_inventory_640x480.png')
-        resize(1280,720)
-        simulated_frames(8)
-        app.input('tab',is_raw=True)
-        visit(props['fuse_box'],house.puzzles['fuse_box'])
-        assert player.progression.power_restored and player.inventory.count('fuse') == 0
-        app.input('f',is_raw=True)
-        simulated_frames(2)
-        capture('render_progression_fuse_box.png')
-        app.input('f',is_raw=True)
-        visit(spawns['kitchen_battery'],house.pickups['kitchen_battery'])
-        assert player.inventory.count('battery') == 1
-        charge = player.stats.battery
-        app.input('tab',is_raw=True)
-        panel = manager.hud.panel
-        while panel.item_ids()[panel.selected] != 'battery':
-            app.input('down arrow',is_raw=True)
-        app.input('u',is_raw=True)
-        simulated_frames(2)
-        capture('render_progression_battery_confirmation.png')
-        app.input('enter',is_raw=True)
-        assert player.inventory.count('battery') == 0 and player.stats.battery > charge
-        app.input('escape',is_raw=True)
-        visit(spawns['kitchen_tally'],house.pickups['kitchen_tally'])
-        simulated_frames(2)
-        capture('render_progression_tally.png')
-        app.input('escape',is_raw=True)
-        visit(props['lockbox'],house.puzzles['lockbox'])
-        for digit in '0000': app.input(digit,is_raw=True)
-        app.input('enter',is_raw=True)
-        assert not player.progression.safe_unlocked
-        simulated_frames(2)
-        capture('render_progression_combination.png')
-        for digit in house.level.house['progression']['combination']: app.input(digit,is_raw=True)
-        app.input('enter',is_raw=True)
-        assert player.progression.safe_unlocked and player.inventory.count('crowbar') == 1
-        visit(props['boards'],house.puzzles['boards'])
-        assert player.progression.boards_removed and player.inventory.count('crowbar') == 1
-        visit(spawns['bedroom_exit_key'],house.pickups['bedroom_exit_key'])
-        assert player.inventory.has_key('exit_key')
-        app.input('f',is_raw=True)
-        simulated_frames(2)
-        manager.hud.message.enabled = False
-        capture('render_progression_objective.png')
-        app.input('f',is_raw=True)
-        walk_to(house.nav_nodes[current_room])
-        for node in astar(current_room,'exit_approach',house.nav_nodes,house.graph):
-            walk_to(house.nav_nodes[node])
-        camera.look_at(Vec3(0,1.5,17.8))
-        app.input('e',is_raw=True)
-        simulated_frames(50)
-        assert house.exit_door.opened
-        camera.rotation = Vec3(0,0,0)
-        player.camera_pivot.rotation_x, player.rotation_y = 0,0
-        app.input('w',is_raw=True)
-        for _ in range(60):
-            simulated_frames(1)
-            if manager.state == 'escaped': break
-        app.input('w up',is_raw=True)
-        assert manager.state == 'escaped'
-        capture('render_progression_escape.png')
+        for playthrough in range(2):
+            if playthrough:
+                app.input('escape',is_raw=True)
+                assert manager.state=='menu' and manager.scene_manager is None
+                app.input('enter',is_raw=True)
+                simulated_frames(2)
+                player,house,ghost=(manager.scene_manager.player,manager.scene_manager.house,
+                                    manager.scene_manager.ghost)
+                assert not player.inventory.quantities and not player.progression.power_restored
+                ghost.enabled=False
+                current_room='foyer'
+            spawns = {entry['id']:entry for entry in house.level.spawns['pickups']}
+            props = {entry['id']:entry for entry in house.level.house['progression']['props']}
+            visit(spawns['foyer_flashlight'],house.pickups['foyer_flashlight'])
+            visit(spawns['living_instructions'],house.pickups['living_instructions'])
+            simulated_frames(2)
+            capture('render_progression_note.png')
+            app.input('escape',is_raw=True)
+            visit(spawns['storage_fuse'],house.pickups['storage_fuse'])
+            app.input('tab',is_raw=True)
+            assert manager.hud.panel.mode == 'inventory' and mouse.locked
+            simulated_frames(2)
+            capture('render_progression_inventory.png')
+            # Check compact screen layout in the actual window, not only arithmetic.
+            resize(640,480)
+            simulated_frames(8)
+            capture('render_progression_inventory_640x480.png')
+            resize(1280,720)
+            simulated_frames(8)
+            app.input('tab',is_raw=True)
+            visit(props['fuse_box'],house.puzzles['fuse_box'])
+            assert player.progression.power_restored and player.inventory.count('fuse') == 0
+            app.input('escape',is_raw=True)
+            assert manager.state=='paused'
+            charge,clock=player.stats.battery,manager.scene_manager.horror.clock
+            simulated_frames(60)
+            assert (player.stats.battery,manager.scene_manager.horror.clock)==(charge,clock)
+            app.input('escape',is_raw=True)
+            simulated_frames(2)
+            app.input('f',is_raw=True)
+            simulated_frames(2)
+            capture('render_progression_fuse_box.png')
+            app.input('f',is_raw=True)
+            visit(spawns['kitchen_battery'],house.pickups['kitchen_battery'])
+            assert player.inventory.count('battery') == 1
+            charge = player.stats.battery
+            app.input('tab',is_raw=True)
+            panel = manager.hud.panel
+            while panel.item_ids()[panel.selected] != 'battery':
+                app.input('down arrow',is_raw=True)
+            app.input('u',is_raw=True)
+            simulated_frames(2)
+            capture('render_progression_battery_confirmation.png')
+            app.input('enter',is_raw=True)
+            assert player.inventory.count('battery') == 0 and player.stats.battery > charge
+            app.input('escape',is_raw=True)
+            visit(spawns['kitchen_tally'],house.pickups['kitchen_tally'])
+            simulated_frames(2)
+            capture('render_progression_tally.png')
+            app.input('escape',is_raw=True)
+            visit(props['lockbox'],house.puzzles['lockbox'])
+            for digit in '0000': app.input(digit,is_raw=True)
+            app.input('enter',is_raw=True)
+            assert not player.progression.safe_unlocked
+            simulated_frames(2)
+            capture('render_progression_combination.png')
+            for digit in house.level.house['progression']['combination']: app.input(digit,is_raw=True)
+            app.input('enter',is_raw=True)
+            assert player.progression.safe_unlocked and player.inventory.count('crowbar') == 1
+            visit(props['boards'],house.puzzles['boards'])
+            assert player.progression.boards_removed and player.inventory.count('crowbar') == 1
+            visit(spawns['bedroom_exit_key'],house.pickups['bedroom_exit_key'])
+            assert player.inventory.has_key('exit_key')
+            app.input('f',is_raw=True)
+            simulated_frames(2)
+            manager.hud.message.enabled = False
+            capture('render_progression_objective.png')
+            app.input('f',is_raw=True)
+            walk_to(house.nav_nodes[current_room])
+            for node in astar(current_room,'exit_approach',house.nav_nodes,house.graph):
+                walk_to(house.nav_nodes[node])
+            camera.look_at(Vec3(0,1.5,17.8))
+            app.input('e',is_raw=True)
+            simulated_frames(50)
+            assert house.exit_door.opened
+            camera.rotation = Vec3(0,0,0)
+            player.camera_pivot.rotation_x, player.rotation_y = 0,0
+            app.input('w',is_raw=True)
+            for _ in range(60):
+                simulated_frames(1)
+                if manager.state == 'escaped': break
+            app.input('w up',is_raw=True)
+            assert manager.state == 'escaped'
+            capture('render_progression_escape.png')
         app.input('r',is_raw=True)
         simulated_frames(2)
         player, house, ghost = (manager.scene_manager.player, manager.scene_manager.house,
                                 manager.scene_manager.ghost)
         assert not player.progression.power_restored and not player.inventory.quantities
-        print('PROGRESSION_WINDOW_OK: W/rays/E, notes, inventory/resize, fuse, wrong/correct code, reusable crowbar, key, exit, R reset; ghost disabled for route fixture')
+        print('PROGRESSION_WINDOW_OK: two full puzzle escapes via victory/menu/new game, pause after fuse, W/rays/E, notes, inventory/resize, fuse, wrong/correct code, reusable crowbar, key, exit, R reset; ghost disabled for route fixture')
         application.calculate_dt = calculate_dt
         mouse.enabled = mouse_enabled
         held_keys.clear()

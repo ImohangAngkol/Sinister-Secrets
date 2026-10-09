@@ -1,50 +1,15 @@
-from ursina import Entity, Text, camera, color
+from game.ui.main_menu import MenuScreen
 
 
-class EndScreen(Entity):
-    def __init__(self):
-        super().__init__(
-            parent=camera.ui,
-            enabled=False,
-        )
+class EndScreen(MenuScreen):
+    def __init__(self, manager=None):
+        options = [] if manager is None else [
+            ("Restart Game", manager.restart_game), ("Main Menu", manager.return_to_menu)]
+        super().__init__("", options, row_y=-.04)
 
-        self.background = Entity(
-            parent=self,
-            model="quad",
-            color=color.rgba32(
-                0,
-                0,
-                0,
-                220,
-            ),
-            scale=(camera.aspect_ratio, 1),
-            z=0.1,
-        )
-
-        self.title_text = Text(
-            parent=self,
-            text="",
-            origin=(0, 0),
-            y=0.07,
-            scale=2.2,
-        )
-
-        self.subtitle_text = Text(
-            parent=self,
-            text="",
-            origin=(0, 0),
-            y=-0.11,
-            scale=1.0,
-        )
-
-    def show(
-        self,
-        title: str,
-        subtitle: str,
-    ):
+    def show(self, title: str, subtitle: str):
         self.enabled = True
+        self.selected = 0
         self.title_text.text = title
         self.subtitle_text.text = subtitle
-
-    def resize(self, aspect):
-        self.background.scale = (aspect, 1)
+        self.refresh_selection()

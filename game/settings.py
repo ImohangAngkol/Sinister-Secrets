@@ -72,7 +72,7 @@ GHOST_INSPECTION_SECONDS = 1.5
 # ITEMS
 EXIT_KEY_ID = "exit_key"
 
-# HORROR PACING / ACCESSIBILITY (no menu yet; frequency 0 disables events)
+# HORROR PACING / ACCESSIBILITY (frequency 0 disables events)
 HORROR_SEED = 1729
 HORROR_EVENT_FREQUENCY = 1.0
 HORROR_INTENSITY_LIMIT = 0.75
@@ -86,3 +86,86 @@ JUMPSCARE_SECONDS = 1.8
 JUMPSCARE_INTENSITY = 0.65  # 0 removes approach, shake, and darkening; catch still ends.
 JUMPSCARE_REDUCED_SHAKE = False
 JUMPSCARE_SHAKE_DEGREES = 0.45
+
+# User preferences are separate from level data and gameplay/save state.
+import json
+import math
+import os
+from pathlib import Path
+
+PREFERENCES_PATH = Path(__file__).resolve().parent / "data" / "user_preferences.json"
+PREFERENCE_DEFAULTS = {
+    "mouse_sensitivity": 1.0,
+    "brightness": 1.0,
+    "shadow_quality": "low",
+    "horror_frequency": HORROR_EVENT_FREQUENCY,
+    "reduced_flicker": HORROR_REDUCED_FLICKER,
+    "reduced_shake": JUMPSCARE_REDUCED_SHAKE,
+    "jumpscare_intensity": JUMPSCARE_INTENSITY,
+    "ghost_difficulty": "standard",
+    "fps_cap": 0,
+}
+PREFERENCE_CHOICES = {
+    "mouse_sensitivity": (.25, .5, .75, 1., 1.25, 1.5, 2., 3.),
+    "brightness": (.5, .75, 1., 1.25, 1.5, 2.),
+    "shadow_quality": ("off", "low", "high"),
+    "horror_frequency": (0., .5, 1., 1.5, 2., 3.),
+    "reduced_flicker": (False, True),
+    "reduced_shake": (False, True),
+    "jumpscare_intensity": (0., .25, .5, .65, .8, 1.),
+    "ghost_difficulty": ("relaxed", "standard", "hard"),
+    "fps_cap": (0, 30, 60, 120),
+}
+NEXT_GAME_SETTINGS = ("shadow_quality", "ghost_difficulty")
+GHOST_DIFFICULTY = {"relaxed": (.85, .8), "standard": (1., 1.), "hard": (1.1, 1.2)}
+
+
+def validate_preferences(values):
+    """Validate a partial configuration, retaining defaults for missing fields."""
+    if not isinstance(values, dict) or set(values) - set(PREFERENCE_DEFAULTS):
+        raise ValueError("Unknown preference or invalid configuration")
+    result = PREFERENCE_DEFAULTS.copy()
+    bounds = {"mouse_sensitivity": (.25, 3), "brightness": (.5, 2),
+              "horror_frequency": (0, 3), "jumpscare_intensity": (0, 1)}
+    for key, value in values.items():
+        if key in bounds:
+            low, high = bounds[key]
+            valid = (type(value) in (int, float) and math.isfinite(value) and low <= value <= high)
+        elif key in ("reduced_flicker", "reduced_shake"):
+            valid = type(value) is bool
+        elif key == "fps_cap":
+            valid = type(value) is int and value in PREFERENCE_CHOICES[key]
+        else:
+            valid = isinstance(value, str) and value in PREFERENCE_CHOICES[key]
+        if not valid:
+            raise ValueError(f"Invalid value for {key}")
+        result[key] = value
+    return result
+
+
+class Preferences:
+    """Validated, atomic local JSON preferences; never a checkpoint/save file."""
+    def __init__(self, path=PREFERENCES_PATH):
+        self.path = Path(path) if path is not None else None
+        self.values = PREFERENCE_DEFAULTS.copy()
+        self.error = ""
+        if self.path is not None and self.path.exists():
+            try:
+                document = json.loads(self.path.read_text(encoding="utf-8"))
+                if document.get("version") != 1:
+                    raise ValueError("Unsupported preferences version")
+                self.values = validate_preferences(document["values"])
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                self.error = "Preferences could not be loaded; using defaults."
+
+    def save(self, values):
+        validated = validate_preferences(values)
+        if self.path is not None:
+            temporary = self.path.with_suffix(".json.tmp")
+            try:
+                temporary.write_text(json.dumps({"version": 1, "values": validated}, indent=2), encoding="utf-8")
+                os.replace(temporary, self.path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        self.values = validated
+        self.error = ""
