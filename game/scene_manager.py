@@ -5,6 +5,8 @@ from game.world.environment import create_environment
 from game.systems.progression import Progression
 from game.systems.horror_manager import HorrorManager
 from game.systems.audio_manager import AudioManager
+from game.systems.narrative import NarrativeProgress
+from game.systems.story_director import StoryDirector
 from ursina import application, camera, destroy, scene
 
 
@@ -34,6 +36,7 @@ class SceneManager:
         self.player.inventory.definitions = self.house.level.items
         self.player.progression = Progression(self.house, self.player)
         self.player.progression.refresh()
+        self.narrative = self.player.narrative = NarrativeProgress(self.player.inventory)
 
         # =========================
         # GHOST
@@ -57,8 +60,12 @@ class SceneManager:
         self.player.audio = self.ghost.audio = self.horror.audio = self.ghost.jumpscare.audio = self.audio
         for name in self.house.level.doors:
             getattr(self.house, name).audio = self.audio
+        self.story = StoryDirector(self)
+        self.horror.story = self.story
+        self.player.story = self.story
 
     def stop_gameplay(self):
+        self.story.cancel_active()
         self.audio.stop_all()
         self.horror.stop()
         self.ghost.jumpscare.cancel()

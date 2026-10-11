@@ -11,6 +11,7 @@ from uuid import UUID
 
 from game.levels.haunted_house import load_level
 from game import settings
+from game.systems.narrative import validate_narrative
 
 log = logging.getLogger(__name__)
 SAVE_VERSION = 1
@@ -111,6 +112,9 @@ def validate_save(document, level=None):
         expected = {k:v for k,v in expected.items() if v}
         if expected != inventory:
             raise SaveError('Inventory and persistent world state disagree')
+        if 'narrative' in data and data['narrative'] is None:
+            raise SaveError('Invalid narrative section')
+        data['narrative'] = validate_narrative(data.get('narrative'), inventory, progress)
         if player['flashlight_on'] and (not inventory.get('flashlight') or player['battery'] <= 0):
             raise SaveError('An unavailable flashlight cannot be on')
         doors = world['doors']
@@ -222,6 +226,7 @@ class SaveManager:
                                 camera_height=p.camera_pivot.y),
                     inventory=dict(p.inventory.quantities),
                     progression={flag:getattr(p.progression, flag) for flag in FLAGS},
+                    narrative=scene_manager.narrative.snapshot(),
                     world=dict(collected=sorted(name for name,entity in house.pickups.items() if entity.is_empty()),
                                doors={name:getattr(house,name).opened for name in house.level.doors}))
         if slot == 'checkpoint':
@@ -239,6 +244,7 @@ class SaveManager:
             if not p.inventory.add(item, quantity):
                 raise SaveError('Inventory could not be restored')
         p.progression.restore(data['progression'], data['world']['collected'])
+        scene_manager.narrative.restore(data['narrative'])
         for name, opened in data['world']['doors'].items():
             door = getattr(house, name)
             if opened:

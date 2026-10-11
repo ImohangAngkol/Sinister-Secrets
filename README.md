@@ -18,6 +18,9 @@ Python/Ursina first-person horror prototype.
 - Menu Up/Down or Tab - Select; Enter or mouse click - Confirm
 - Settings Left/Right - Adjust; Apply and Back saves; Esc cancels
 - PgUp/PgDn - Menu pages and note pages
+- Inventory Right arrow - Evidence journal; Left arrow - Return to inventory
+- Journal Up/Down / Enter - Select/read; Backspace from a lore note - Journal
+- Enter / Esc - Skip introduction or ending cards
 - Controls/Rebind - Change gameplay keys; Escape always closes/cancels menus
 
 ## Prototype 0.1
@@ -50,6 +53,301 @@ into inventory and used deliberately. Read the living-room note to begin the
 fuse, combination, and crowbar sequence below. The yellow exit key remains
 inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
 with E, then walk through the opening to escape. The ghost uses an original jointed procedural humanoid.
+
+## Milestone 9: The Keeper's Secret
+
+Inspected clean `main` at **9125acb**, in
+`C:\Users\User\Desktop\Sinister_Secrets`. The actual baseline suite passed all
+**194 tests in 291.422 seconds**. Milestone 8 was already committed locally;
+this milestone does not commit, push or merge. Existing folder/module structure,
+house/waypoint JSON, puzzle solutions, essential item placements, inventory,
+five-state ghost AI, flashlight, checkpoints and preferences are retained.
+
+### Story and exploration
+
+The player enters the abandoned Vale house to recover records about the family's
+disappearance. The Keeper heard imitated voices and, through fear, locked the
+real family inside. His records explain the removed fuse, secured crowbar and
+boarded exit key. Their ultimate fate and the ghost's identity remain uncertain.
+The internal timeline and writing rules are in [STORY.md](STORY.md).
+
+The timeline runs from the family's arrival on 14 October 1987, through the
+Keeper's maintenance/voice observations and containment decisions on 16–19
+October, the empty rooms on 20 October, the missing notice on 23 October, and
+his confession on 2 November. The folded record is deliberately undated.
+Existing Keeper's Instructions and Household Tally are unchanged; **2417**
+remains the combination, and no optional record is needed for the puzzle chain.
+
+| Optional document / stable item ID | Existing room and landmark |
+|---|---|
+| Photograph annotation / `lore_family_photo` | Foyer bench, abstract family frame |
+| Keeper's private journal / `lore_keeper_journal` | Living-room cabinet |
+| Damaged maintenance report / `lore_maintenance` | Storage boxes beside the fuse area |
+| Missing-person notice / `lore_missing_notice` | Dining table |
+| Unsent letter / `lore_unsent_letter` | Bedroom One console, packed case |
+| Strange observation log / `lore_observation_log` | Kitchen cabinet front |
+| Final caretaker confession / `lore_keeper_confession` | Bedroom Two console, beside the key cabinet |
+| Folded containment record / `lore_hidden_record` | Bathroom basin |
+
+`game/data/story.json` owns original text, record positions, six events and story
+cards. Level loading merges records into the **existing** item/spawn authority
+without overriding its IDs. Records are unique retained notes, never consumable
+or puzzle-gated. Their spawn IDs use the `story_` prefix. All eight can be reached
+before solving the puzzles. Existing notes remain in inventory; optional records
+live in its Evidence Journal. Only discovered titles appear there. Arrows/Enter
+reread records, pages respect text scale, and the panel retains live survival
+gameplay. The journal displays evidence count and the eligibility rule.
+
+One cached, collider-free mesh adds the photograph/frame, abstract three-person
+portrait, ribbon, packed case and containment-door scratches. It uses existing
+wood material and vertex colors, follows decorative-detail settings, creates no
+update callbacks and does not alter furniture/wall collision or navigation.
+The sealed basement retains its key restriction; its feedback now fits the story.
+
+### Introduction, authored encounters and endings
+
+New Game plays four seven-second cards: missing family, investigation, arrival
+with quiet knocks, and control in the authored foyer. **Enter or Escape skips**;
+pause/focus loss freezes the card clock. Gameplay, battery and ghost capture are
+frozen during the introduction. Skipping/natural completion clears held input,
+restores capture and grants the established five-second ghost grace interval.
+Continue, Retry and terminal R restart do not replay it. No mandatory camera
+motion, flashing, imported video or additional light is used.
+
+| Stable event ID | Trigger | Presentation |
+|---|---|---|
+| `first_warning` | Keeper's Instructions collected | Distant decorative cabinet leaf moves; silhouette when a passage is visible |
+| `power_restoration` | Fuse installed | One smooth, restrained ambient/fill dip and quiet knocks |
+| `the_watcher` | Private journal collected; a clear passage visible | Cached geometric silhouette watching from the passage |
+| `lockbox_revelation` | Lockbox solved | Decorative chair surface shifts; explanatory caption |
+| `bedroom_memory` | Crowbar obtained; near boarded cabinet | Ribbon/scratches memory caption and restrained cue |
+| `final_warning` | Exit key, sufficient evidence, and exit-area approach | Caption and apparition when a safe visible position exists |
+
+Authored events last 4–5 seconds with a **12-second cooldown** afterwards.
+Eligibility waits during CHASE/JUMPSCARE, substantial detection, close danger,
+grace, hiding, interfaces, door motion and the director's quiet interval. The
+watcher waits for an actual visible passage. Starting a story beat restores any
+random effect; random disturbances wait while it runs. The real ghost continues
+its existing simulation and is never teleported by story code. Temporary
+silhouettes have no collider and vanish if approached. Captions carry every
+story beat without requiring hearing.
+
+IDs commit when a beat starts, so danger/interface cancellation cannot replay
+the same surprise. Cancel/load/restart restore colors/transforms, remove temporary
+entities and stop only the cue owned by that beat. Reduced shake disables the
+decorative movement; dimming is smooth even with Reduced Flicker off. Horror
+frequency zero retains the readable story captions with no added event geometry,
+light dip or story cue. Intro/ending ambience still respects audio preferences.
+
+`NarrativeProgress` derives documents and three central discoveries from retained
+inventory rather than duplicating counters. **Escape** requires the existing
+exit key only. **The Truth** requires at least **five of eight records**, including
+the private journal, observation log and confession. The journal explains the
+required categories without listing undiscovered titles. On crossing the opened
+north exit, sufficient evidence gives an explicit keyboard/mouse choice of both
+endings; Escape remains available. Escape on the choice selects normal Escape.
+Both endings use four skippable seven-second cards and then the existing victory,
+R restart and main-menu flow. Ending ambience reuses the cached ambience/tension
+clips at different restrained gains; there is no third ending or new major puzzle.
+
+### Persistence and compatibility
+
+Save envelope remains **version 1**, preserving the original typed mechanical
+validation, atomic writes, staging/rollback, inventory, doors and checkpoint
+behavior. An optional typed `narrative` section has its own version 1, sorted
+document/event IDs, and `intro_seen`. Validation rejects unknown/duplicate IDs,
+invalid types, evidence/inventory disagreements and event prerequisite bypasses.
+Truth eligibility and discoveries are derived on restore. Missing narrative fields
+in older version-1 saves migrate **in memory** to empty events, inferred retained
+lore, and introduction seen; existing files are never deleted or silently rewritten.
+An explicitly invalid narrative section is rejected with the existing safe error UI.
+
+Active event/cinematic state, sound playback, camera animation and temporary
+objects are never saved. Continue/Retry rebuild these cleanly and do not replay
+completed events. Retry restores the exact checkpoint snapshot, including its
+evidence: discoveries/events acquired **after** that checkpoint may occur again.
+This is normal snapshot recovery, not a global story completion ledger. R resets
+records and events for a fresh run; manual saves retain the existing preservation
+rules. Introduction/ending/choice states cannot save or trigger capture.
+
+### Validation, performance and native screenshots
+
+**Final suite: 228 tests passed in 378.691 seconds** (all 194 original case names
+retained, plus 12 pure narrative/schema and 22 real-engine story regressions).
+Coverage includes intro freeze/skip/focus/natural duration, all lore walk/rays,
+duplicate prevention/rereading, event prerequisites/danger/cooldown/one-time IDs,
+random-director coordination, cleanup, pause, 4/30/60/120-FPS timing, reduced
+motion/zero-horror captions, save migration/validation, Continue/Retry snapshots,
+both endings/choice, scaling, restart and the original full escape/AI/lighting
+checks. Mechanical legacy fixtures explicitly opt out of story scheduling/cards;
+story cases enable and test them. Generic screen checks now handle rowless story
+cards, and expected manifest/sealed-door copy was updated. No old test was removed.
+Compilation and `git diff --check` passed.
+
+Native Windows testing launches actual `main.py`, using temporary save slots,
+memory-only preferences, scripted keys/lens aim, and pinned focus. Four complete
+controller/raycast/puzzle routes passed: A essential puzzles → Escape without lore;
+B eight records → explicit Truth choice; C safe manual Save → Quit to menu →
+Continue without intro → Truth; D power checkpoint → **live ghost capture** →
+Retry with preserved evidence → Truth. The ghost is disabled during deterministic
+route/UI fixtures and enabled for D's catch. This is scripted native validation,
+not human playtesting or physical mouse/Alt-Tab testing. No Linux virtual display
+is available; the native Windows GPU window is used.
+
+The opening, arrival/foyer, note, evidence journal, power event, apparition,
+ending choice and both endings were rendered and visually inspected. Native
+resizing captured cards/journal/notes at all three text scales and **640×480,
+960×720, 1280×720**. The apparition also has a world-region pixel comparison against
+the same empty view; screenshots exposed weak side-door contrast, which was
+corrected by centering the clear placement and adjusting its dim tint. No new
+white surfaces or shader compilation errors were observed. Packaged-icon and
+sRGB warnings already present at baseline remain.
+
+Performance work batches fixed-tick paranormal visual writes into the one frame
+actually rendered, shares one waypoint visibility query between random apparition
+types, bounds story visibility scans, caches a single baked silhouette, combines
+the ghost's original sockets/mouth into one cached geometry, and skips redundant
+backend volume writes. Original joint motion, collider and AI remain intact. No
+new shadow light or postprocessing is added. Comparable general fixtures preserve
+M8's fixed 1/60 step, extra render call, default 512 spotlight shadow, seeded live
+ghost and sample counts; story scheduling/cards are explicitly disabled only in
+these measurements. Separate effect fixtures freeze the ghost and report whether
+the beam is on; apparition fixtures switch it off to prevent their intended
+beam cancellation. Their timing must not be compared directly to the live fixture.
+
+Final comparable native measurements on the RTX 3050 Laptop GPU (median / p95
+milliseconds, task step **plus extra render**, not human gameplay FPS):
+
+| Scenario | Committed M8 before | M9 standard | M9 low |
+|---|---:|---:|---:|
+| Exploration | 25.57 / 37.43 | 21.36 / 33.68 | 24.30 / 35.23 |
+| Live CHASE | 28.32 / 44.61 | 23.81 / 32.92 | 30.54 / 60.85 |
+| Paranormal power dip | 28.77 / 46.63 | 35.43 / 57.79 | 25.49 / 30.90 |
+| Capture | 21.57 / 27.24 | 19.33 / 35.77 | 18.71 / 24.19 |
+
+There is **no established overall performance improvement**: the final standard
+paranormal median/p95 regress, and capture p95 regresses despite its lower median.
+Low CHASE median/p95 also regress despite lower costs in its other scenarios.
+General fixtures use 120 frames, capture 70;
+there are no confidence intervals or isolated GPU/CPU measurements. Earlier in
+this session, before changes, the original short fixture measured paranormal
+27.60 / 42.74; the historical M8 report measured 24.75 / 41.72. These differences
+show run/driver/scheduling variability; the table uses the closest comparable
+before/after runs rather than selecting the fastest baseline.
+
+The separate 90-frame-per-effect fixtures measured the highest baseline median
+for `distant_close` (30.44 / 45.54). The final updated run's highest effect medians
+were `prop_vibration` **32.45 / 43.73** and `cabinet_creak` **30.88 / 50.42**
+(before 24.11 / 33.84 and 23.90 / 40.52). `distant_close` measured 23.56 / 34.06;
+`shadow_pass` 20.72 / 31.52 (before 23.18 / 37.15), and `apparition` 19.88 / 32.79
+(before 23.32 / 33.69). Room dimming's p95 was 40.32 → 41.34; hallway dimming
+36.16 → 37.03. The full effect distributions
+remain in the JSON, including regressions. Code inspection identifies broad
+surface recoloring, visibility ray scans and moving shadowed decoration as costly
+paths; measurements do not isolate a single cause of the historical M8 regression.
+The more recognizable five-box apparition adds vertices even though it uses fewer
+entities/geoms. Further profiling/mesh work belongs in the next performance pass.
+
+Ordinary live fixture counts: **511 → 534 entities, 265 → 272 geoms, 4020 → 4380
+vertices, 157 → 167 registered colliders**. Eight extra house colliders are the
+optional record pickups (102 → 110); two are ending-choice rows. Original wall,
+floor, prop and door collision footprints and navigation are unchanged. Lights
+remain **3**. Standard texture RAM remains **288 KiB**; low retains both cached
+sets (**360 KiB**, not VRAM). Exploration private process bytes were 154,722,304
+before and 155,111,424 after; these include driver/caches and are not a leak proof.
+Scene geom/vertex counts are proxies, not measured GPU draw calls.
+
+One initial extended benchmark lost valid window rendering and produced black
+captures mid-run; its data was discarded. The harness now restores an inactive
+or minimized window, reports both flags, and requires real OFF/ON pixel checks.
+The repeated before, standard and low runs all passed those checks with active,
+non-minimized windows. Actual OpenAL smoke also passed **NATIVE_AUDIO_PLAYBACK_OK**:
+all 16 original clips, mute/volume, loop reuse, pause/focus cancellation and cleanup.
+No human listening is claimed.
+
+Profiles: [Before](game/tests/render_m8_m9_before_events_profile.json),
+[After](game/tests/render_m8_m9_after_profile.json), [Low](game/tests/render_m8_m9_low_profile.json),
+[Narrative routes](game/tests/render_m9_story_profile.json).
+
+Native screenshot evidence (generated and Git-ignored, never game assets):
+
+- [Opening](game/tests/render_m9_opening.png), [Arrival](game/tests/render_m9_arrival.png), [Updated foyer](game/tests/render_m9_foyer.png)
+- [Narrative note](game/tests/render_m9_narrative_note.png), [Full journal](game/tests/render_m9_journal.png)
+- [Apparition](game/tests/render_m9_apparition.png), [Empty comparison](game/tests/render_m9_apparition_clear.png), [Power restoration](game/tests/render_m9_power_restoration.png)
+- [Ending choice](game/tests/render_m9_ending_choice.png), [Escape](game/tests/render_m9_escape_ending.png), [Truth](game/tests/render_m9_truth_ending.png)
+- [150% journal at 640×480](game/tests/render_m9_journal_1.5_640x480.png), [Note](game/tests/render_m9_note_1.5_640x480.png), [Story card](game/tests/render_m9_cards_1.5_640x480.png)
+
+### Files and reproduction
+
+Created: `STORY.md`, `game/data/story.json`,
+`game/systems/{narrative,story_director}.py`, `game/ui/story_screen.py`,
+`game/tests/{test_narrative,story_smoke}.py`.
+
+Modified: `README.md`, `game/assets/manifest.json`, `game/data/doors.json`,
+`game/{game_manager,scene_manager}.py`, `game/ghost/ghost_visual.py`,
+`game/levels/haunted_house.py`, `game/world/house.py`,
+`game/systems/{asset_manager,audio_manager,horror_manager,save_manager}.py`,
+`game/ui/inventory_ui.py`, and existing test/smoke files
+`game/tests/{test_prototype,test_presentation,presentation_smoke,windowed_smoke,audio_smoke}.py`.
+No essential JSON layout/spawn/item data, ghost AI/perception/navigation source,
+audio files, external assets or dependency versions are changed.
+
+```powershell
+Set-Location C:\Users\User\Desktop\Sinister_Secrets
+.\.venv\Scripts\python.exe -m compileall -q main.py game
+.\.venv\Scripts\python.exe -m unittest discover -s game/tests -v
+git diff --check
+.\.venv\Scripts\python.exe -u -m game.tests.story_smoke
+.\.venv\Scripts\python.exe -u -m game.tests.story_smoke --visual-only
+.\.venv\Scripts\python.exe -u -m game.tests.presentation_smoke --label m9_after --silent --event-profile
+.\.venv\Scripts\python.exe -u -m game.tests.presentation_smoke --label m9_before_events --silent --event-profile --baseline --source-commit 9125acb
+.\.venv\Scripts\python.exe -u -m game.tests.presentation_smoke --label m9_low --silent --low
+.\.venv\Scripts\python.exe -u -m game.tests.audio_smoke
+.\.venv\Scripts\python.exe main.py
+```
+
+Manual acceptance: select New Game and read or Enter/Escape skip the 28-second
+intro. Verify mouse/WASD, flashlight E/F, pause and physical Alt-Tab. Read the
+living-room Instructions; collect the storage fuse and install it in the kitchen.
+Read the kitchen tally; open the dining lockbox with **2417**, use the crowbar
+at Bedroom Two boards, collect the exit key, E at the north exit, wait for its
+0.8-second opening and walk outside. With no optional records, expect Escape.
+Skip or watch its cards and check R/Main Menu.
+
+For Truth, collect the journal, observation log and confession plus any two other
+records from the table above. Tab → Right opens evidence; arrows/Enter reread,
+PgUp/PgDn change pages, Backspace returns to journal, Left returns to inventory.
+The journal must indicate Truth available. At the north exit, verify the two
+choices and try both on separate runs. Optional lore must never gate normal exit.
+Look down clear passages after reading the journal; authored beats wait for safe
+exploration and can be interrupted by danger or interfaces. Save from a safe
+pause, return to menu and Continue; check records/events and absence of intro.
+Reach a checkpoint, get caught and Retry; compare exact evidence/resources to
+that snapshot. Test reduced shake/flicker, horror frequency zero, volume sliders,
+three text scales/resolutions, focus loss during cards, and repeated R restarts.
+
+Remaining limitations: story cards and static baked silhouettes are deliberately
+restrained procedural presentation, without voice performances, cinematic camera
+paths or production animation. Warning/final beats use readable captions when
+no safe silhouette position is visible; the watcher waits for one. Checkpoint
+recovery can replay post-snapshot encounters. Existing synthetic audio timbre,
+distance-only audio positioning, shadow-off light leaks/aliasing and driver/cache
+variation remain. First-time mystery comprehension, chase/reading fairness,
+physical mouse/focus behavior, human sound balance, integrated-GPU performance
+and multi-hour sessions still require human acceptance.
+
+Milestone 10 should prioritize blind first-time playtests (comprehension and fair
+escape), human audio/motion accessibility, integrated-GPU profiling and measured
+mesh batching, then subtle spatial audio/occlusion, better original apparition
+silhouettes and localized journal typography. Keep the current save/route regressions
+as gates before considering basement expansion or additional narrative content.
+
+Cached procedural mesh roots also need independent ownership in Ursina 8.3:
+`Entity.model` reparents a supplied NodePath. The asset manager now returns node
+copies sharing immutable Geom/vertex buffers, preserving simultaneous actors and
+the outgoing scene on rejected staged loads. A dedicated regression verifies
+distinct parents, shared buffers and retained house/ghost presentation after
+failed restore. This was found by source audit after the initial passing suite.
 
 ## Milestone 8: original materials, animation, and audio
 

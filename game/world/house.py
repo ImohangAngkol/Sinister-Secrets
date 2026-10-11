@@ -95,7 +95,26 @@ class House(Entity):
                    scale=(.10,.025,.18),color=color.rgb32(112,103,78),collider=None)
         for prop in self.puzzles.values():
             prop.material_name='wood' if prop.puzzle_id=='boards' else 'metal'
+        self._build_story_details()
         self.material_surfaces=[entity for entity in descendants(self) if hasattr(entity,'material_name')]
+
+    def _build_story_details(self):
+        # One baked mesh, within existing furniture/wall footprints. No
+        # collision, update callbacks, lights, or new navigation obstacles.
+        frame = [((-3.5,.72,-17),(1,.06,.56),(79,61,45)),
+                 ((-3.5,.76,-17),(.85,.025,.42),(126,119,101))]
+        # An abstract family portrait is procedural geometry, not a bitmap.
+        for x,height in ((-3.75,.12),(-3.5,.12),(-3.28,.08)):
+            frame.append(((x,.78,-17),(.10,.015,height),(58,61,59)))
+        for i in range(5):
+            frame.append(((15.43,1.05+i*.09,-5.52),(.018,.025,.33),(43,36,31)))
+        frame.append(((8.7,.755,8.55),(.28,.012,.07),(115,64,66)))  # Elsie's ribbon
+        frame.append(((8.8,.73,-8.45),(.22,.04,.13),(71,63,51)))  # packed case
+        details = Entity(parent=self.decorations,shader=None,collider=None,
+                         model=self.assets.box_mesh('story_details',frame))
+        details.material_name='wood'
+        # Keep photograph faces and ribbon colours independent of inherited
+        # entity tint; standard lighting still illuminates vertex colours.
 
     def apply_presentation(self, values):
         quality=values['texture_quality']

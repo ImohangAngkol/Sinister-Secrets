@@ -95,10 +95,12 @@ class HorrorManager:
         self.history = deque(maxlen=64)
         self.previous_room = None
         self.room_entered = -1000.0
+        self.apparition_shader = unlit_shader
 
     def protected(self):
         player = self.player
         return (not self.running or not player.enabled or application.paused or player.hud.panel.active
+                or getattr(getattr(self,'story',None),'active',None) is not None
                 or player.hidden or self.ghost.ai.state in (GhostState.CHASE,GhostState.JUMPSCARE)
                 or any((player.world_position-prop.world_position).length() < 3
                        for prop in self.house.puzzles.values() if prop.enabled)
@@ -132,12 +134,15 @@ class HorrorManager:
         if room is None:
             return []
         visuals = self.safe_visuals(room)
-        return [event for event in EVENTS
+        candidates = [event for event in EVENTS
                 if (not event.rooms or room.room_id in event.rooms)
                 and event.minimum_tension <= self.director.tension
                 and (event.category != "environment" or visuals)
-                and (event.category != "apparition" or self.apparition_position())
                 and (event.name != "distant_close" or self.clock-self.room_entered <= 10)]
+        # Both apparition types use the same visibility query. Do the costly
+        # waypoint ray scan once, only if one is otherwise eligible.
+        visible = self.apparition_position() if any(e.category=='apparition' for e in candidates) else []
+        return [e for e in candidates if e.category!='apparition' or visible]
 
     def update(self, dt):
         if not self.running or application.paused:
@@ -155,7 +160,9 @@ class HorrorManager:
                 self.previous_room, self.room_entered = room_id,self.clock
             self.director.update(1/30,self.clock,self.player,self.ghost,self.clock-self.last_event)
             if self.active:
-                self._advance_event(1/30)
+                # Preserve fixed scheduling/envelopes, but write presentation
+                # once for the frame that will actually be rendered.
+                self._advance_event(1/30, render=self._accumulator < 1/30-1e-9)
             if self.clock >= self.next_check-1e-8:
                 self.next_check += settings.HORROR_CHECK_SECONDS/max(self.frequency,.01)
                 if (self.frequency > 0 and self.active is None and self.clock >= self.next_allowed
@@ -201,11 +208,9 @@ class HorrorManager:
                 active['transforms'].append((visual,Vec3(visual.position),Vec3(visual.rotation)))
         else:
             _, position = self.rng.choice(self.apparition_position())
-            silhouette = Entity(parent=self.house, model='cube', shader=unlit_shader, collider=None,
-                                position=position+Vec3(0,.75,0), scale=(.6,1.3,.045),
+            silhouette = Entity(parent=self.house, model=self.house.assets.apparition_mesh(), shader=unlit_shader, collider=None,
+                                position=position+Vec3(0,.75,0), scale=(.8,.8,1),
                                 color=color.rgb32(15,16,22))
-            Entity(parent=silhouette,model='cube',shader=None,position=(0,.63,0),
-                   scale=(.48,.27,1),color=color.rgb32(15,16,22))
             silhouette.look_at_2d(self.player.world_position,'y')
             active['temporary'].append(silhouette)
             active['transforms'].append((silhouette,Vec3(silhouette.position),Vec3(silhouette.rotation)))
@@ -220,11 +225,15 @@ class HorrorManager:
         self.last_event = self.clock
         return True
 
-    def _advance_event(self, dt):
+    def _advance_event(self, dt, render=True):
         active = self.active
         active['elapsed'] = min(active['definition'].seconds,active['elapsed']+dt)
         event = active['definition']
         elapsed, duration, intensity = active['elapsed'],event.seconds,active['intensity']
+        if not render:
+            if elapsed >= duration-1e-8:
+                self.cancel_active()
+            return
         envelope = math.sin(math.pi*elapsed/duration)**2
         if event.category == 'lighting':
             if not getattr(self, 'reduced_flicker', settings.HORROR_REDUCED_FLICKER) and event.name != 'fill_failure':

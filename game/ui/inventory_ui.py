@@ -93,6 +93,8 @@ class GameplayPanel(Entity):
         self.footer.y = -.28 if factor>1 else -.32
 
     def _open(self, player, mode):
+        if hasattr(player,'story'):
+            player.story.cancel_active()
         if hasattr(player,'horror'):
             player.horror.cancel_active()
         self.player, self.mode = player, mode
@@ -116,6 +118,7 @@ class GameplayPanel(Entity):
         self.refresh()
 
     def open_note(self, player, item_id):
+        self.note_return = 'journal' if self.mode=='journal' else None
         self._open(player, "note")
         self.note_id = item_id
         self.refresh()
@@ -144,25 +147,38 @@ class GameplayPanel(Entity):
         self.player = None
 
     def item_ids(self):
-        return list(self.player.inventory.quantities)
+        return [item for item in self.player.inventory.quantities
+                if not self.player.inventory.definitions.get(item,{}).get('lore')]
+
+    def open_journal(self, player):
+        self._open(player,'journal')
+        self.selected = 0
+        self.refresh()
 
     def wrap(self, text):
         return "\n".join(textwrap.fill(line, width=int(55/self.parent.text_scale)) for line in self.parent.control_text(text).split("\n"))
 
     def refresh(self):
         inventory = self.player.inventory
-        if self.mode == "inventory":
-            ids = self.item_ids()
+        if self.mode in ('inventory','journal'):
+            journal = self.mode=='journal'
+            ids = list(self.player.narrative.documents) if journal else self.item_ids()
             self.selected = min(self.selected, max(0, len(ids)-1))
-            self.title.text = "INVENTORY"
-            start = self.selected // 5 * 5
+            self.title.text = f'EVIDENCE JOURNAL — {len(ids)}/8' if journal else "INVENTORY"
+            per_page = max(3,int(5/self.parent.text_scale))
+            start = self.selected // per_page * per_page
             self.body.text = "\n".join(
                 f"{'>' if i == self.selected else ' '} {inventory.definitions.get(item, {}).get('name', item)}  x{inventory.count(item)}"
-                for i, item in enumerate(ids[start:start+5], start)) or "No items collected."
+                for i, item in enumerate(ids[start:start+per_page], start)) or ("No records discovered." if journal else "No items collected.")
             definition = inventory.definitions.get(ids[self.selected], {}) if ids else {}
-            self.detail.text = self.wrap(self.status or definition.get("description", "Explore to collect useful items."))
+            if journal:
+                self.detail.text = self.wrap('Truth available at the exit.' if self.player.narrative.mystery_uncovered else
+                                            'Truth: five records including a caretaker journal, observation log, and confession. Escape needs no optional records.')
+            else:
+                self.detail.text = self.wrap(self.status or definition.get("description", "Explore to collect useful items."))
             self.footer.text = ("Enter: confirm battery | Backspace: cancel | Esc/Tab: close" if self.confirming else
-                                "Up/Down: select | Enter: inspect/read | U: use battery\nEsc/Tab: close | The ghost and flashlight remain active.")
+                                "Up/Down: select | Enter: read | Left: inventory\nEsc/Tab: close | Gameplay continues." if journal else
+                                "Up/Down: select | Enter: inspect/read | U: battery\nRight: evidence journal | Esc/Tab: close | Gameplay continues.")
         elif self.mode == "note":
             definition = inventory.definitions[self.note_id]
             self.title.text = definition["name"]
@@ -172,7 +188,7 @@ class GameplayPanel(Entity):
             self.note_page = min(self.note_page,pages-1)
             self.body.text = '\n'.join(lines[self.note_page*per_page:(self.note_page+1)*per_page])
             self.detail.text = ""
-            self.footer.text = f"Page {self.note_page+1}/{pages} | PgUp/PgDn: read pages\nEsc/Tab: close | Note kept. Gameplay continues."
+            self.footer.text = f"Page {self.note_page+1}/{pages} | PgUp/PgDn: read pages\nEsc/Tab: close | {'Backspace: journal' if definition.get('lore') else 'Note kept. Gameplay continues.'}"
         else:
             self.title.text = "DINING LOCKBOX"
             self.body.text = f"Four wheels:  {self.digits.ljust(4, '_')}\n\n" + self.wrap(self.status or "The keeper's instructions and kitchen tally explain the order.")
@@ -188,6 +204,15 @@ class GameplayPanel(Entity):
                 self.player.audio.play('select', gain=.25, cooldown=.08)
         if key in ('escape',self.player.bindings['inventory']):
             self.close()
+            return
+        if self.mode=='inventory' and key=='right arrow':
+            self.open_journal(self.player)
+            return
+        if self.mode=='journal' and key=='left arrow':
+            self.open_inventory(self.player)
+            return
+        if self.mode=='note' and key=='backspace' and self.player.inventory.definitions[self.note_id].get('lore'):
+            self.open_journal(self.player)
             return
         if self.mode == 'note' and key in ('page up','page down'):
             self.note_page = max(0,self.note_page+(-1 if key=='page up' else 1))
@@ -207,8 +232,8 @@ class GameplayPanel(Entity):
                 else:
                     self.status = "Incorrect combination. Read the clues and try again."
                     self.digits = ""
-        elif self.mode == "inventory":
-            ids = self.item_ids()
+        elif self.mode in ('inventory','journal'):
+            ids = list(self.player.narrative.documents) if self.mode=='journal' else self.item_ids()
             if ids:
                 item_id = ids[self.selected]
                 if key in ("up arrow", "down arrow"):

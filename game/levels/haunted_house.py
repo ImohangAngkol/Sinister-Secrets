@@ -22,6 +22,8 @@ def load_level():
     level = LevelData(read("levels/haunted_house.json"), read("levels/navigation.json"),
                       read("data/spawn_points.json"), read("data/doors.json"),
                       read("data/items.json"))
+    from game.systems.narrative import add_story_pickups
+    add_story_pickups(level.items, level.spawns)
     validate_level(level)
     return level
 

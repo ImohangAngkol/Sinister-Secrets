@@ -46,7 +46,7 @@ class PresentationTests(unittest.TestCase):
 
     def test_manifest_records_all_original_assets_and_generators(self):
         assets=AssetManager()
-        self.assertEqual(len(assets.manifest),23)
+        self.assertEqual(len(assets.manifest),25)
         for name,entry in assets.manifest.items():
             self.assertEqual(entry['license'],'LicenseRef-ProjectOriginal')
             self.assertTrue(entry['origin'])

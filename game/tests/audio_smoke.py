@@ -31,6 +31,8 @@ def verify(app):
             app.taskMgr.step()
             wall.sleep(.02)
     try:
+        manager.cinematics_enabled=False
+        manager.story_events_enabled=False
         manager.start_game();frames(2)
         audio=manager.scene_manager.audio
         player=manager.scene_manager.player

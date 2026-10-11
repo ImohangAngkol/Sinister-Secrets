@@ -28,6 +28,8 @@ def verify_window(app):
     from game.settings import Preferences
 
     manager = next(entity for entity in scene.entities if isinstance(entity, GameManager))
+    manager.cinematics_enabled=False  # Story fixtures separately cover cinematics.
+    manager.story_events_enabled=False
     # Deterministic defaults without overwriting the player's local preferences.
     manager.preferences = Preferences(path=None)
     from game.systems.save_manager import SaveManager

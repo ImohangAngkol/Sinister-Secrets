@@ -10,6 +10,7 @@ class AudioManager:
             loader = application.base.loader.load_sfx
         self.assets, self.loader = asset_manager, loader
         self.sounds, self.last, self.playing = {}, {}, {}
+        self._volumes_written = {}
         self.clock = self.distance = 0.0
         self.paused, self.closed = True, False
         self.listener = None
@@ -53,7 +54,12 @@ class AudioManager:
     def _refresh_volumes(self):
         for name, (gain, position, loop) in self.playing.items():
             sound, channel = self.sounds[name]
-            sound.set_volume(0 if self.paused else self._volume(channel, gain, position))
+            self._write_volume(name,sound,0 if self.paused else self._volume(channel, gain, position))
+
+    def _write_volume(self, name, sound, value):
+        if self._volumes_written.get(name) != value:
+            sound.set_volume(value)
+            self._volumes_written[name] = value
 
     def play(self, sound_name, *, loop=False, gain=1.0, position=None, cooldown=.2):
         if self.closed or self.paused or self.clock-self.last.get(sound_name, -1000) < cooldown:
@@ -67,7 +73,7 @@ class AudioManager:
         sound.set_loop(loop)
         sound.set_time(0)
         position = tuple(position) if position is not None else None
-        sound.set_volume(self._volume(channel, gain, position))
+        self._write_volume(sound_name,sound,self._volume(channel, gain, position))
         sound.play()
         self.playing[sound_name] = (gain, position, loop)
         self.last[sound_name] = self.clock
@@ -144,4 +150,5 @@ class AudioManager:
     def close(self):
         self.stop_all()
         self.sounds.clear()
+        self._volumes_written.clear()
         self.closed = True

@@ -15,14 +15,19 @@ from game.systems.save_manager import SaveManager, SaveError
 from game.systems.audio_manager import AudioManager
 from game.systems.horror_manager import destroy_temporary
 from game.ghost.ghost_states import GhostState
+from game.ui.story_screen import StoryScreen
+from game.systems.narrative import STORY
 
 
 class GameManager(Entity):
-    def __init__(self, preferences=None, save_manager=None):
+    def __init__(self, preferences=None, save_manager=None, cinematics_enabled=True, story_events_enabled=True):
         super().__init__(ignore_paused=True)
         self.preferences = preferences if preferences is not None else settings.Preferences()
         self.save_manager = save_manager if save_manager is not None else SaveManager()
         self.automatic_checkpoints = True
+        self.cinematics_enabled = cinematics_enabled
+        self.story_events_enabled = story_events_enabled
+        self.ending = None
         self._checkpoint_recorded = set()
         self._last_manual_save = -1000
         self._submenu_stack = []
@@ -42,13 +47,20 @@ class GameManager(Entity):
         self.settings_menu = SettingsMenu(self)
         self.controls_screen = ControlsScreen(self)
         self.end_screen = EndScreen(self)
+        self.story_screen = StoryScreen()
+        self.ending_choice = MenuScreen('AT THE NORTH EXIT', [
+            ('Leave now — Escape',lambda:self.choose_ending('escape')),
+            ('Carry the evidence — The Truth',lambda:self.choose_ending('truth'))],
+            'You found enough evidence. Both ways lead outside.')
         self.new_game_confirmation = MenuScreen('START A NEW GAME?',[
             ('Confirm New Game', self.confirm_new_game),('Cancel', self.cancel_new_game)],
             'Checkpoint resets. The next Save replaces manual progress.')
         self.screens = {"menu": self.main_menu, "paused": self.pause_menu,
                         "settings": self.settings_menu, "controls": self.controls_screen,
                         "dead": self.end_screen, "escaped": self.end_screen,
-                        'confirm_new': self.new_game_confirmation}
+                        'confirm_new': self.new_game_confirmation,
+                        'intro':self.story_screen,'ending':self.story_screen,
+                        'ending_choice':self.ending_choice}
         self.window_events = DirectObject()
         self.window_events.accept("window-event", self._window_event)
         self.on_destroy = self._cleanup_audio_events
@@ -93,6 +105,14 @@ class GameManager(Entity):
         if not self._focused:
             self._clear_input()
             return True
+        if self.state in ('intro','ending'):
+            if key in ('enter','escape'):
+                self.finish_story_sequence()
+            self._clear_input()
+            return True
+        if self.state=='ending_choice' and key=='escape':
+            self.choose_ending('escape')
+            return True
         if self.state != 'playing' and key in ('up arrow','down arrow','enter','left arrow','right arrow','left mouse down'):
             self.menu_audio.play('select',gain=.25,cooldown=.08)
         if self.state == "playing":
@@ -134,7 +154,7 @@ class GameManager(Entity):
         if self.save_manager.exists():
             self._show_screen('confirm_new')
             return False
-        self._create_session()
+        self._create_session(introduction=True)
         return True
 
     def confirm_new_game(self):
@@ -145,7 +165,7 @@ class GameManager(Entity):
         except OSError as error:
             self.new_game_confirmation.subtitle_text.text = f'Could not reset checkpoint: {type(error).__name__}'
             return
-        self._create_session()
+        self._create_session(introduction=True)
 
     def cancel_new_game(self):
         self._show_screen('menu')
@@ -297,7 +317,11 @@ class GameManager(Entity):
         self.hud.message_sequence.pause()
         return True
 
-    def _create_session(self):
+    def _create_session(self, introduction=False):
+        self.menu_audio.stop_all()
+        self.story_screen.kind = None
+        self.ending = None
+        self._intro_cue_played = False
         if self.scene_manager:
             self.scene_manager.dispose()
             self.scene_manager = None
@@ -316,8 +340,15 @@ class GameManager(Entity):
         self._show_screen("playing")
         self.hud.show_message("Find the flashlight. Read the living-room note; Tab opens inventory. Esc pauses.", seconds=4)
         self.hud.message_sequence.pause()
+        if introduction and self.cinematics_enabled:
+            self.story_screen.begin('intro',STORY['intro'])
+            self._show_screen('intro')
+            self.menu_audio.play('ambience',loop=True,gain=.3,cooldown=0)
+        else:
+            self.scene_manager.narrative.intro_seen = True
 
     def _configure_session(self):
+        self.scene_manager.story.enabled = self.story_events_enabled
         values = self.preferences.values
         self.session_preferences = values.copy()
         light = self.scene_manager.player.flashlight_light._light
@@ -346,6 +377,8 @@ class GameManager(Entity):
             self._show_screen("playing")
 
     def return_to_menu(self):
+        self.menu_audio.stop_all()
+        self.story_screen.kind = None
         if self.scene_manager:
             self.scene_manager.dispose()
             self.scene_manager = None
@@ -423,6 +456,7 @@ class GameManager(Entity):
         self.scene_manager.house.apply_presentation(values)
         player.mouse_sensitivity = Vec2(40, 40) * values["mouse_sensitivity"]
         horror = self.scene_manager.horror
+        self.scene_manager.story.cancel_active()
         horror.cancel_active()
         old = horror.frequency
         horror.frequency = values["horror_frequency"]
@@ -490,6 +524,13 @@ class GameManager(Entity):
             self.hud.layout(aspect)
             for screen in set(self.screens.values()):
                 screen.resize(aspect)
+        if self._focused and self.state in ('intro','ending'):
+            if self.state=='intro' and self.story_screen.elapsed >= 14 and not self._intro_cue_played:
+                self.menu_audio.play('knock',gain=.18,cooldown=0)
+                self._intro_cue_played = True
+            if self.story_screen.advance(time.dt_unscaled):
+                self.finish_story_sequence()
+            return
         if self._focused and not application.paused and self.scene_manager:
             sm = self.scene_manager
             sm.audio.update(time.dt, camera.world_position, sm.ghost.ai.state,
@@ -497,6 +538,7 @@ class GameManager(Entity):
                             quiet=sm.horror.clock < sm.horror.director.quiet_until,
                             gameplay=self.state == 'playing')
             if self.state == "playing":
+                self.scene_manager.story.update(time.dt)
                 self.scene_manager.horror.update(time.dt)
                 self._checkpoints()
             elif self.state == "jumpscare":
@@ -521,7 +563,48 @@ class GameManager(Entity):
     def win_game(self):
         if self.state != "playing":
             return
+        if self.cinematics_enabled and not self.scene_manager.narrative.endings:
+            return
         self.scene_manager.stop_gameplay()
+        if self.cinematics_enabled:
+            if 'truth' in self.scene_manager.narrative.endings:
+                self.ending_choice.selected = 0
+                self.ending_choice.refresh_selection()
+                self._show_screen('ending_choice')
+            else:
+                self.choose_ending('escape',from_exit=True)
+            return
+        self.ending = 'escape'
+        self._finish_victory()
+
+    def choose_ending(self, ending, from_exit=False):
+        if self.state != 'ending_choice' and not (from_exit and self.state=='playing'):
+            return False
+        if ending not in self.scene_manager.narrative.endings:
+            return False
+        self.ending = ending
+        self.story_screen.begin(ending,STORY['endings'][ending])
+        self._show_screen('ending')
+        self.menu_audio.stop_all()
+        self.menu_audio.play('ambience' if ending=='escape' else 'tension',loop=True,
+                             gain=.28 if ending=='escape' else .20,cooldown=0)
+        return True
+
+    def finish_story_sequence(self):
+        if self.state not in ('intro','ending'):
+            return
+        self.menu_audio.stop_all()
+        if self.state == 'intro':
+            self.scene_manager.narrative.intro_seen = True
+            self._show_screen('playing')
+            self.scene_manager.ghost.ai.grace_time = settings.LOAD_GRACE_SECONDS
+            self.hud.show_message('Find the flashlight. Read the living-room instructions; Tab opens inventory.',seconds=5)
+            self.hud.message_sequence.pause()
+        else:
+            self._finish_victory()
+
+    def _finish_victory(self):
         self._show_screen("escaped")
-        self.end_screen.show("YOU ESCAPED", "You made it out of the house.\nR: restart   Escape: main menu")
+        self.end_screen.show('THE TRUTH LEAVES WITH YOU' if self.ending=='truth' else "YOU ESCAPED",
+                             "You made it out of the house.\nR: restart   Escape: main menu")
         self.end_screen.configure_checkpoint(False)

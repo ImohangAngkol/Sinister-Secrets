@@ -72,7 +72,9 @@ class PrototypeTests(unittest.TestCase):
         time.dt = time.dt_unscaled = 1 / 60
         self.save_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.save_directory.cleanup)
-        self.manager = GameManager(preferences=Preferences(path=None), save_manager=SaveManager(self.save_directory.name))
+        # Existing mechanical fixtures opt out of story cards; M9 cases below
+        # explicitly enable and verify them rather than bypassing engine input.
+        self.manager = GameManager(preferences=Preferences(path=None), save_manager=SaveManager(self.save_directory.name), cinematics_enabled=False, story_events_enabled=False)
         self.manager.automatic_checkpoints = False  # Legacy fixtures may inject items instead of collecting them.
         self.manager.start_game()
         self.manager.update()  # Consume the first clean session frame.
@@ -347,7 +349,12 @@ class PrototypeTests(unittest.TestCase):
                 screen.resize(aspect)
                 self.assertAlmostEqual(screen.background.scale_x, aspect)
                 self.assertLessEqual(1.14*screen.content.scale_x, aspect-.09)
-                self.assertLessEqual(max(abs(row.y)+row.scale_y/2 for row,_ in screen.rows), .5)
+                if hasattr(screen,'rows'):
+                    self.assertLessEqual(max(abs(row.y)+row.scale_y/2 for row,_ in screen.rows), .5)
+                else:
+                    # Story cards have text instead of selectable menu rows.
+                    self.assertLess(screen.body.y,.5)
+                    self.assertGreater(screen.footer.y,-.5)
             self.manager.settings_menu.selected = 4
             self.manager.settings_menu.resize(aspect)
             self.assertEqual(self.manager.settings_menu.selected, 4)
@@ -1903,7 +1910,7 @@ class PrototypeTests(unittest.TestCase):
         self.aim(Vec3(15.6, 1.5, -6))
         self.assertIs(get_interaction_hit(self.player).entity, self.house.basement_door)
         self.player.input("e")
-        self.assertIn("future milestone", self.manager.hud.message.text)
+        self.assertIn("sealed", self.manager.hud.message.text)
         self.player.rotation_y = 90
         self.move("w", seconds=1)
         self.assertLess(self.player.x, 15.2)
@@ -2946,6 +2953,347 @@ class PrototypeTests(unittest.TestCase):
         self.manager.return_to_menu()
         self.assertTrue(current.closed)
         self.assertFalse(current.playing)
+
+    # M9 narrative cases use the same actual engine and cleanup as prior tests.
+    def story_fixture(self):
+        sm = self.manager.scene_manager
+        sm.story.enabled = True
+        sm.story.next_allowed = 0
+        sm.horror.director.quiet_until = 0
+        self.ghost.ai.grace_time = self.ghost.ai.detection = 0
+        self.player.position = Vec3(0,0,-7)
+        self.ghost.position = Vec3(-14,0,6)
+        return sm.story
+
+    def collect_lore(self, ids=None):
+        from game.systems.narrative import DOCUMENT_IDS
+        for item_id in ids or sorted(DOCUMENT_IDS):
+            entity = next(e for e in self.house.pickups.values() if getattr(e,'item_id',None)==item_id)
+            self.assertTrue(entity.interact(self.player))
+            self.manager.hud.panel.close()
+
+    def test_story_intro_freezes_simulation_and_skip_restores_controls(self):
+        self.manager.return_to_menu()
+        self.manager.cinematics_enabled=True
+        self.assertTrue(self.manager.start_game())
+        self.rebind_session_refs()
+        self.assertEqual(self.manager.state,'intro')
+        p,g = self.player,self.ghost
+        before = (Vec3(p.position),Vec3(g.position),p.stats.battery)
+        for _ in range(5):
+            time.dt=time.dt_unscaled=1
+            held_keys['w']=held_keys['shift']=1
+            self.app.taskMgr.step()
+        self.assertEqual(before,(p.position,g.position,p.stats.battery))
+        self.assertTrue(application.paused)
+        self.assertFalse(self.manager.save_game())
+        self.manager.begin_jumpscare()
+        self.assertEqual(self.manager.state,'intro')
+        self.app.input('enter',is_raw=True)
+        self.assertEqual(self.manager.state,'playing')
+        self.assertTrue(mouse.locked)
+        self.assertFalse(application.paused)
+        self.assertTrue(self.manager.scene_manager.narrative.intro_seen)
+        self.assertFalse(held_keys['w'])
+
+    def test_story_intro_focus_loss_freezes_cards_and_natural_finish_is_28_seconds(self):
+        self.manager.return_to_menu();self.manager.cinematics_enabled=True
+        self.manager.start_game();self.manager.update()
+        self.manager.set_focus(False)
+        time.dt_unscaled=30;self.manager.update()
+        self.assertEqual(self.manager.story_screen.elapsed,0)
+        self.manager.set_focus(True);self.manager.update()
+        time.dt_unscaled=27.9;self.manager.update()
+        self.assertEqual(self.manager.state,'intro')
+        time.dt_unscaled=.1;self.manager.update()
+        self.assertEqual(self.manager.state,'playing')
+        self.assertFalse(self.manager.menu_audio.playing)
+
+    def test_story_lore_collects_once_and_rereads_from_existing_panel(self):
+        entity = self.house.pickups['story_family_photo']
+        self.assertTrue(entity.interact(self.player))
+        self.assertEqual(self.manager.hud.panel.mode,'note')
+        self.assertFalse(entity.interact(self.player))
+        self.assertEqual(self.player.inventory.count('lore_family_photo'),1)
+        self.manager.input('backspace')
+        panel=self.manager.hud.panel
+        self.assertEqual(panel.mode,'journal')
+        self.assertIn('1/8',panel.title.text)
+        self.assertNotIn("Keeper's private journal",panel.body.text)
+        self.manager.input('enter')
+        self.assertEqual(panel.note_id,'lore_family_photo')
+
+    def test_story_lore_is_reachable_with_actual_walk_routes_and_interaction_rays(self):
+        current='foyer'
+        for spawn in self.house.level.spawns['pickups']:
+            if not spawn['item'].startswith('lore_'):continue
+            with self.subTest(record=spawn['id']):
+                self.walk_route(current,spawn['room']);self.walk_to(spawn['approach'])
+                entity=self.house.pickups[spawn['id']]
+                self.aim(entity.world_position)
+                self.assertIs(get_interaction_hit(self.player).entity,entity)
+                self.player.input('e');self.manager.hud.panel.close()
+                self.walk_to(self.house.nav_nodes[spawn['room']]);current=spawn['room']
+        self.assertEqual(len(self.player.narrative.documents),8)
+        self.assertFalse(self.player.progression.power_restored)
+
+    def test_story_first_warning_once_cooldown_and_cleanup(self):
+        story=self.story_fixture()
+        self.house.pickups['living_instructions'].interact(self.player);self.manager.hud.panel.close()
+        graph={key:tuple(value) for key,value in self.house.graph.items()}
+        colliders=set(scene.collidables)
+        self.assertTrue(story.start_event('first_warning'))
+        temporary=story.active['temporary'][:]
+        story.update(2)
+        self.assertFalse(story.start_event('first_warning'))
+        story.cancel_active()
+        self.assertTrue(all(e.is_empty() for e in temporary))
+        self.assertEqual(set(scene.collidables),colliders)
+        self.assertEqual(graph,{key:tuple(value) for key,value in self.house.graph.items()})
+        self.assertEqual(story.next_allowed,story.clock+12)
+        story.clock+=20;self.manager.scene_manager.horror.director.quiet_until=0
+        self.assertFalse(story.start_event('first_warning'))
+
+    def test_story_events_wait_during_chase_hiding_interfaces_and_grace(self):
+        story=self.story_fixture();self.player.inventory.add('lore_keeper_journal')
+        self.ghost.ai.state=GhostState.CHASE
+        self.assertFalse(story.start_event('the_watcher'))
+        self.ghost.ai.state=GhostState.PATROL
+        self.manager.hud.panel.open_inventory(self.player)
+        self.assertFalse(story.start_event('the_watcher'))
+        self.manager.hud.panel.close()
+        self.ghost.ai.grace_time=2
+        self.assertFalse(story.start_event('the_watcher'))
+        self.ghost.ai.grace_time=0
+        spot=self.house.hiding_spots[0];self.player.position=Vec3(spot.approach)
+        self.assertTrue(self.player.enter_hiding(spot))
+        self.assertFalse(story.start_event('the_watcher'))
+
+    def test_story_power_restoration_restores_lights_and_keeps_beam_unchanged(self):
+        story=self.story_fixture();self.persistence_fixture()
+        self.manager.scene_manager.horror.director.quiet_until=0
+        original=[tuple(light.color) for light in self.manager.scene_manager.lights]
+        beam=tuple(self.player.flashlight_light.color)
+        self.assertTrue(story.start_event('power_restoration'))
+        story.update(2.5)
+        self.assertNotEqual(original,[tuple(light.color) for light in self.manager.scene_manager.lights])
+        self.assertEqual(beam,tuple(self.player.flashlight_light.color))
+        story.update(2.5)
+        self.assertIsNone(story.active)
+        self.assertEqual(original,[tuple(light.color) for light in self.manager.scene_manager.lights])
+
+    def test_story_interface_cancels_event_without_replaying_and_random_director_waits(self):
+        story=self.story_fixture();self.persistence_fixture()
+        horror=self.manager.scene_manager.horror;horror.next_allowed=0
+        self.assertTrue(story.start_event('power_restoration'))
+        self.assertFalse(horror.eligible_events())
+        self.manager.input('tab')
+        self.assertIsNone(story.active)
+        self.assertIn('power_restoration',self.player.narrative.completed_events)
+        self.manager.input('escape')
+        self.assertFalse(story.start_event('power_restoration'))
+
+    def test_story_chase_cancels_apparition_without_moving_real_ghost(self):
+        story=self.story_fixture();self.player.inventory.add('lore_keeper_journal')
+        self.player.rotation_y=0;self.player.camera_pivot.rotation_x=0;camera.rotation=Vec3(0,0,0)
+        before=Vec3(self.ghost.position)
+        self.assertTrue(story.start_event('the_watcher'))
+        temporary=story.active['temporary'][:]
+        self.assertTrue(temporary)
+        self.ghost.ai.state=GhostState.CHASE;story.update(.1)
+        self.assertIsNone(story.active)
+        self.assertTrue(all(e.is_empty() for e in temporary))
+        self.assertEqual(self.ghost.position,before)
+        self.assertEqual(self.ghost.ai.state,GhostState.CHASE)
+
+    def test_story_pause_and_focus_loss_preserve_event_time(self):
+        story=self.story_fixture();self.persistence_fixture()
+        self.assertTrue(story.start_event('power_restoration'))
+        self.manager.pause_game();story.update(30)
+        self.assertEqual(story.active['elapsed'],0)
+        self.manager.set_focus(False);self.manager.resume_game();story.update(30)
+        self.assertEqual(story.active['elapsed'],0)
+        self.manager.set_focus(True);self.manager.update()
+        story.update(1)
+        self.assertEqual(story.active['elapsed'],1)
+
+    def test_story_save_continue_retains_lore_events_and_skips_intro(self):
+        self.persistence_fixture();self.collect_lore()
+        story=self.story_fixture();self.assertTrue(story.start_event('the_watcher'));story.cancel_active()
+        self.manager.cinematics_enabled=True
+        self.manager.pause_game();self.assertTrue(self.manager.save_game())
+        before=self.player.narrative.snapshot();old_audio=self.manager.scene_manager.audio
+        self.manager.return_to_menu();self.assertTrue(self.manager.continue_game())
+        self.rebind_session_refs()
+        self.assertEqual(self.manager.state,'playing')
+        self.assertEqual(self.player.narrative.snapshot(),before)
+        self.assertIsNone(self.manager.scene_manager.story.active)
+        self.assertTrue(old_audio.closed)
+        self.assertTrue(self.player.narrative.mystery_uncovered)
+
+    def test_story_checkpoint_retry_restores_snapshot_evidence_without_duplicates(self):
+        self.persistence_fixture();self.collect_lore(['lore_family_photo','lore_keeper_journal'])
+        self.player.narrative.completed_events.add('the_watcher')
+        self.manager.automatic_checkpoints=True;self.manager._checkpoints()
+        data=self.manager.save_manager.load('checkpoint');self.assertIsNotNone(data)
+        self.collect_lore(['lore_keeper_confession'])
+        self.manager.cinematics_enabled=True
+        self.manager.game_over();self.assertTrue(self.manager.retry_checkpoint());self.rebind_session_refs()
+        self.assertEqual(self.player.narrative.snapshot(),data['narrative'])
+        self.assertFalse(self.house.pickups['story_keeper_confession'].is_empty())
+        self.assertTrue(self.house.pickups['story_keeper_journal'].is_empty())
+        self.assertEqual(self.manager.state,'playing')
+
+    def test_story_normal_exit_ending_needs_no_optional_lore_and_can_skip(self):
+        self.persistence_fixture(complete=True)
+        self.manager.cinematics_enabled=True
+        self.manager.win_game()
+        self.assertEqual(self.manager.state,'ending')
+        self.assertEqual(self.manager.ending,'escape')
+        self.assertEqual(self.manager.story_screen.duration,28)
+        self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'escaped')
+        self.assertFalse(self.manager.menu_audio.playing)
+
+    def test_story_truth_choice_keeps_both_endings_and_does_not_silently_select(self):
+        self.persistence_fixture(complete=True);self.collect_lore()
+        self.manager.cinematics_enabled=True;self.manager.win_game()
+        self.assertEqual(self.manager.state,'ending_choice')
+        self.assertIsNone(self.manager.ending)
+        self.assertFalse(self.manager.choose_ending('unknown'))
+        self.app.input('down arrow',is_raw=True);self.app.input('enter',is_raw=True)
+        self.assertEqual(self.manager.ending,'truth')
+        self.assertEqual(self.manager.state,'ending')
+        self.manager.update();time.dt_unscaled=28;self.manager.update()
+        self.assertEqual(self.manager.state,'escaped')
+        self.assertIn('TRUTH',self.manager.end_screen.title_text.text)
+
+    def test_story_evidence_choice_can_still_take_normal_escape(self):
+        self.persistence_fixture(complete=True);self.collect_lore()
+        self.manager.cinematics_enabled=True;self.manager.win_game();self.app.input('escape',is_raw=True)
+        self.assertEqual(self.manager.state,'ending')
+        self.assertEqual(self.manager.ending,'escape')
+
+    def test_story_restart_clears_records_events_and_cinematic_audio(self):
+        self.persistence_fixture(complete=True);self.collect_lore()
+        self.player.narrative.completed_events.add('the_watcher')
+        self.manager.cinematics_enabled=True;self.manager.win_game();self.manager.choose_ending('truth')
+        self.manager.finish_story_sequence();self.manager.input('r');self.rebind_session_refs()
+        self.assertEqual(self.manager.state,'playing')
+        self.assertEqual(self.player.narrative.documents,())
+        self.assertFalse(self.player.narrative.completed_events)
+        self.assertIsNone(self.manager.scene_manager.story.active)
+        self.assertFalse(self.manager.menu_audio.playing)
+        self.assertIsNone(self.manager.ending)
+
+    def test_story_journal_keyboard_scaling_keeps_unknown_titles_hidden(self):
+        self.collect_lore(['lore_family_photo','lore_keeper_journal','lore_maintenance'])
+        for factor in (1,1.25,1.5):
+            self.manager.preferences.values['text_scale']=factor;self.manager.apply_live_preferences()
+            for aspect in (640/480,960/720,1280/720):
+                self.manager.hud.layout(aspect)
+                self.manager.input('tab');self.manager.input('right arrow')
+                panel=self.manager.hud.panel
+                self.assertEqual(panel.mode,'journal')
+                self.assertNotIn('Final caretaker confession',panel.body.text)
+                self.assertIn('3/8',panel.title.text)
+                self.manager.input('down arrow');self.manager.input('enter')
+                self.assertEqual(panel.mode,'note')
+                self.manager.input('backspace');self.manager.input('left arrow')
+                self.assertEqual(panel.mode,'inventory')
+                self.manager.input('escape')
+
+    def test_story_repeated_encounters_leave_no_temporary_entities_or_lights(self):
+        story=self.story_fixture();self.persistence_fixture(complete=True);self.collect_lore()
+        story.enabled=False
+        time.dt=.5
+        self.app.taskMgr.step()
+        self.app.taskMgr.step()
+        story.enabled=True
+        def world_count():
+            return sum(not e.is_empty() and (e==self.house or e.has_ancestor(self.house)) for e in scene.entities)
+        count=world_count();lights=self.app.render.get_state().get_attrib(LightAttrib)
+        for event in ('first_warning','power_restoration','the_watcher','lockbox_revelation','bedroom_memory','final_warning'):
+            self.player.position=Vec3(7.2,0,9.9) if event=='bedroom_memory' else Vec3(0,0,15) if event=='final_warning' else Vec3(0,0,-7)
+            self.ghost.position=Vec3(-14,0,6)
+            story.next_allowed=0;self.manager.scene_manager.horror.director.quiet_until=0
+            self.assertTrue(story.start_event(event))
+            story.cancel_active();self.app.taskMgr.step()
+            self.assertEqual(world_count(),count)
+            self.assertEqual(self.app.render.get_state().get_attrib(LightAttrib),lights)
+        self.assertEqual(len(self.player.narrative.completed_events),6)
+
+    def test_story_event_timers_and_cinematic_durations_match_at_four_frame_rates(self):
+        from game.ui.story_screen import StoryScreen
+        from game.systems.narrative import STORY
+        story=self.story_fixture();self.persistence_fixture()
+        sm=self.manager.scene_manager
+        original=[tuple(light.color) for light in sm.lights]
+        for fps in (4,30,60,120):
+            sm.narrative.completed_events.clear();story.next_allowed=0
+            sm.horror.director.quiet_until=0
+            self.assertTrue(story.start_event('power_restoration'))
+            for _ in range(5*fps):story.update(1/fps)
+            self.assertIsNone(story.active)
+            self.assertEqual(original,[tuple(light.color) for light in sm.lights])
+            screen=self.manager.story_screen;screen.begin('intro',STORY['intro'])
+            for _ in range(28*fps):done=screen.advance(1/fps)
+            self.assertTrue(done)
+            self.assertAlmostEqual(screen.elapsed,28)
+
+    def test_story_reduced_motion_and_zero_horror_keep_readable_beats_without_effects(self):
+        story=self.story_fixture();self.persistence_fixture()
+        sm=self.manager.scene_manager
+        sm.horror.frequency=0
+        self.assertTrue(story.start_event('power_restoration'))
+        self.assertFalse(story.active['colors'])
+        self.assertFalse(story.active['temporary'])
+        self.assertIn('relay',self.manager.hud.message.text)
+        story.cancel_active();story.next_allowed=0;sm.horror.director.quiet_until=0
+        sm.horror.frequency=1;self.player.presentation.reduced=True
+        self.assertTrue(story.start_event('first_warning'))
+        visual,position,rotation=story.active['transforms'][0]
+        story.update(2)
+        self.assertEqual(visual.rotation,rotation)
+        self.assertEqual(visual.position,position)
+
+    def test_story_apparition_clears_on_approach_without_capture_or_collision_changes(self):
+        story=self.story_fixture();self.player.inventory.add('lore_keeper_journal')
+        self.player.rotation_y=self.player.camera_pivot.rotation_x=0;camera.rotation=Vec3(0,0,0)
+        self.assertTrue(story.start_event('the_watcher'))
+        silhouette=story.active['temporary'][0]
+        colliders=set(scene.collidables)
+        self.player.position=Vec3(silhouette.position)+Vec3(0,-.85,-1)
+        story.update(.1)
+        self.assertIsNone(story.active)
+        self.assertTrue(silhouette.is_empty())
+        self.assertEqual(set(scene.collidables),colliders)
+        self.assertEqual(self.manager.state,'playing')
+
+    def test_story_cached_mesh_instances_preserve_geometry_and_outgoing_failed_load(self):
+        from game.systems.asset_manager import assets
+        from game.systems.save_manager import SaveError
+        boxes=[((0,0,0),(1,1,1),(90,100,110))]
+        first=Entity(model=assets.box_mesh('test_shared_presentation',boxes))
+        second=Entity(model=assets.box_mesh('test_shared_presentation',boxes))
+        self.assertEqual(first.model.get_parent(),first)
+        self.assertEqual(second.model.get_parent(),second)
+        self.assertNotEqual(first.model,second.model)
+        a=first.model.find('**/+GeomNode').node().get_geom(0).get_vertex_data()
+        b=second.model.find('**/+GeomNode').node().get_geom(0).get_vertex_data()
+        self.assertEqual(a,b)  # Immutable buffers shared; parent/state are not.
+        self.persistence_fixture()
+        self.manager.pause_game();self.assertTrue(self.manager.save_game())
+        detail=self.house.decorations.children[-1]
+        face=self.ghost.visual.head.children[-1]
+        old_detail_model,old_face_model=detail.model,face.model
+        with patch.object(self.manager.save_manager,'restore',side_effect=SaveError('Staged restore rejected')):
+            self.assertFalse(self.manager.load_game())
+        self.assertIs(self.manager.scene_manager.house,self.house)
+        self.assertEqual(old_detail_model.get_parent(),detail)
+        self.assertEqual(old_face_model.get_parent(),face)
+        self.assertFalse(old_detail_model.is_empty())
+        self.assertFalse(old_face_model.is_empty())
 
 if __name__ == "__main__":
     unittest.main()

@@ -129,5 +129,39 @@ class AssetManager:
         return dict(cached_entries=len(self.cache),procedural_texture_ram_bytes=sum(t.get_ram_image_size() for t in textures),
                     procedural_texture_count=len(textures))
 
+    def box_mesh(self, name, boxes):
+        """Bake once; return independent nodes sharing immutable geometry."""
+        key = ('geometry',name)
+        if key not in self.cache:
+            from ursina import Mesh, Vec3, color
+            corners = [(-1,-1,-1),(-1,-1,1),(-1,1,-1),(-1,1,1),
+                       (1,-1,-1),(1,-1,1),(1,1,-1),(1,1,1)]
+            faces = [(0,4,6,2),(5,1,3,7),(1,0,2,3),(4,5,7,6),(2,6,7,3),(1,5,4,0)]
+            directions = [(0,0,-1),(0,0,1),(-1,0,0),(1,0,0),(0,1,0),(0,-1,0)]
+            vertices, triangles, normals, uvs, colors = [], [], [], [], []
+            for position,size,tint in boxes:
+                for face,normal in zip(faces,directions):
+                    start = len(vertices)
+                    for index,uv in zip(face,((0,0),(1,0),(1,1),(0,1))):
+                        c = corners[index]
+                        vertices.append(tuple(Vec3(*position)+Vec3(*(c[j]*size[j]/2 for j in range(3)))))
+                        normals.append(normal);uvs.append(uv);colors.append(color.rgb32(*tint))
+                    triangles.extend(((start,start+2,start+1),(start,start+3,start+2)))
+            self.cache[key] = Mesh(vertices=vertices,triangles=triangles,normals=normals,uvs=uvs,colors=colors)
+        # Entity.model reparents a NodePath verbatim in Ursina 8.3. Sharing that
+        # root would steal presentation from an outgoing staged-load scene or
+        # the real ghost during capture. copy_to shares Geom/vertex buffers but
+        # gives each caller its own parent, texture and color-scale state.
+        from panda3d.core import NodePath
+        return self.cache[key].copy_to(NodePath('asset_instance'))
+
+    def apparition_mesh(self):
+        return self.box_mesh('apparition', [
+            ((0,.1,0),(.44,1.1,.045),(255,255,255)),
+            ((0,.8,0),(.25,.32,.045),(255,255,255)),
+            ((-.28,.05,0),(.10,.85,.045),(255,255,255)),
+            ((.28,.05,0),(.10,.85,.045),(255,255,255)),
+            ((0,-.54,0),(.30,.45,.045),(255,255,255))])
+
 
 assets=AssetManager()

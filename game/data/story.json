@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "documents": {
+    "lore_family_photo": {
+      "name": "Photograph annotation", "room": "foyer",
+      "position": [-3.5, 0.69, -17], "approach": [-3.5, 0, -15.8],
+      "text": "14 October 1987. Mara, Daniel, and little Elsie Vale, outside their new home.\n\nOn the back, another hand has written: Three people. Remember that. Even if you hear four."
+    },
+    "lore_keeper_journal": {
+      "name": "Keeper's private journal", "room": "living",
+      "position": [-3, 1.84, -2], "approach": [-3, 0, -3.4],
+      "text": "17 October 1987.\nMara called me from the kitchen. At the same moment, her voice asked to be let out of the bedroom. She was standing beside me.\n\nI am the caretaker. Keeping them safe is my responsibility. But which voice should I believe?"
+    },
+    "lore_maintenance": {
+      "name": "Damaged maintenance report", "room": "storage",
+      "position": [-16.5, 0.85, -2], "approach": [-15, 0, -2],
+      "text": "16 October 1987. North exit relay unreliable. Replacement fuse stored here; kitchen box feeds the dining lockbox.\n\n18 October: Fuse removed by caretaker. Pry bar secured behind the household count wheels. Exit key boarded into bedside cabinet. No authorization from the family."
+    },
+    "lore_missing_notice": {
+      "name": "Missing-person notice", "room": "dining",
+      "position": [-8.2, 1.03, 3.5], "approach": [-8.2, 0, 5.3],
+      "text": "23 October 1987. MISSING: Mara Vale, Daniel Vale, Elsie Vale, age seven. Last seen at their home on 19 October.\n\nCaretaker questioned; released without charges. No departure witnessed. No bodies recovered. Please report sightings rather than entering the property."
+    },
+    "lore_unsent_letter": {
+      "name": "Unsent letter", "room": "bedroom_one",
+      "position": [8.8, 0.76, -8.7], "approach": [7.4, 0, -8.7],
+      "text": "18 October 1987. Dear Ruth,\nThe Keeper says the voices are dangerous. He has locked our way out for our own protection. Daniel asked for the key. The Keeper would not look at him.\n\nIf this reaches you, come in daylight. Elsie keeps asking why we must prove we are ourselves. — Mara"
+    },
+    "lore_observation_log": {
+      "name": "Strange observation log", "room": "kitchen",
+      "position": [-12.08, 1.4, 10], "approach": [-13.4, 0, 10],
+      "text": "19 October, 21:10. Three voices pleaded at the north door. I told myself they were copies.\n20 October, 04:00. Rooms empty. Supper untouched. Elsie's ribbon left behind.\n20 October, 04:12. The voices repeated the same pleas, word for word.\n\nThe thing may remember us. A familiar face is not proof of a person."
+    },
+    "lore_keeper_confession": {
+      "name": "Final caretaker confession", "room": "bedroom_two",
+      "position": [8.7, 0.76, 9.25], "approach": [7.2, 0, 9.9],
+      "text": "2 November 1987.\nI locked them inside. I hid the key. I heard a frightened child and decided she was an imitation. They vanished before I returned.\n\nI called it containment because I could not call it my fault. The instructions and tally will undo my locks. Take the records outside. Do not let my fear become the only account."
+    },
+    "lore_hidden_record": {
+      "name": "Folded containment record", "room": "bathroom",
+      "position": [11.3, 1.06, 10], "approach": [12.7, 0, 10],
+      "text": "An undated page folded beside the washroom basin.\n\nDo not follow a voice alone. Do not imprison someone because you fear what they resemble. Keep dates. Keep names. Leave a route out.\n\nBelow this, in the Keeper's hand: It wears my coat now. Or I have begun to recognize myself in it."
+    }
+  },
+  "events": [
+    {"id": "first_warning", "kind": "warning", "seconds": 5, "cue": "creak", "caption": "A distant cabinet creaks. For a moment, someone occupies the doorway."},
+    {"id": "power_restoration", "kind": "power", "seconds": 5, "cue": "knock", "caption": "The relay answers. Somewhere beyond it, three quiet knocks."},
+    {"id": "the_watcher", "kind": "apparition", "seconds": 5, "cue": "presence", "caption": "A coat-shaped shadow watches from the passage. It is gone before you can name it."},
+    {"id": "lockbox_revelation", "kind": "shift", "seconds": 4, "cue": "knock", "caption": "A chair shifts. The Keeper locked away the tool that could have freed them."},
+    {"id": "bedroom_memory", "kind": "memory", "seconds": 5, "cue": "presence", "caption": "Scratched into the cabinet: LET US OUT. A child's ribbon lies beneath the boards."},
+    {"id": "final_warning", "kind": "apparition", "seconds": 5, "cue": "creak", "caption": "The records are yours to carry. Beyond the north door, a familiar outline waits."}
+  ],
+  "intro": [
+    {"title": "THE KEEPER'S SECRET", "text": "In October 1987, the Vale family disappeared inside this house. Their caretaker left records. Nobody found a way to explain them."},
+    {"title": "THE INVESTIGATION", "text": "You came to recover those records and learn why the family never left. Tonight, the abandoned house has an open entrance."},
+    {"title": "ARRIVAL", "text": "The entrance closes behind you. Somewhere in the house, three quiet knocks answer your footsteps. The north exit is locked."},
+    {"title": "INSIDE", "text": "A flashlight waits on the foyer console. Search the rooms, read the Keeper's instructions, and find a way out. Optional records may tell you what happened."}
+  ],
+  "endings": {
+    "escape": [
+      {"title": "ESCAPE", "text": "The north door opens. Cold air replaces the stillness of the house. You keep walking."},
+      {"title": "BEHIND YOU", "text": "You heard something in there. You found the Keeper's locks and undid them. You still do not know whom they were meant to keep safe."},
+      {"title": "THE EMPTY HOUSE", "text": "The Vale family remains missing. Another account joins the rumors: yours. For tonight, surviving is enough."},
+      {"title": "OUTSIDE", "text": "You leave the property alive. Somewhere behind the closed door, footsteps continue."}
+    ],
+    "truth": [
+      {"title": "THE TRUTH", "text": "The dates agree. The Keeper took the fuse, secured the pry bar, and hid the key while the family was still inside."},
+      {"title": "CONTAINMENT", "text": "Something imitated their voices. Fear made the Keeper distrust the real pleas as well. He locked the family in, then called their disappearance protection."},
+      {"title": "THE FIGURE", "text": "The presence remembers voices and shapes. Whether the figure is the Keeper, one of the missing, or an echo remains uncertain. His records cannot answer that."},
+      {"title": "WITNESS", "text": "You carry the evidence outside. Mara, Daniel, and Elsie have names again, and the Keeper's secret has witnesses. The house loses its only account."}
+    ]
+  }
+}

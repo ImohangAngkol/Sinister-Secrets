@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time as wall
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import Filename, LightAttrib, SceneGraphAnalyzer, TexturePool, loadPrcFileData
+from panda3d.core import Filename, LightAttrib, SceneGraphAnalyzer, TexturePool, WindowProperties, loadPrcFileData
 
 loadPrcFileData('', 'model-cache-dir\n')
 if '--silent' in sys.argv:
@@ -26,6 +26,8 @@ def verify(app):
     label=sys.argv[sys.argv.index('--label')+1] if '--label' in sys.argv else 'after'
     random.seed(8008)  # scoped fixture: repeatable patrol choices for before/after
     manager=next(e for e in scene.entities if isinstance(e,GameManager))
+    manager.cinematics_enabled=False  # Comparable M8 timings isolate gameplay.
+    manager.story_events_enabled=False  # The power_dip fixture is unchanged.
     folder=tempfile.TemporaryDirectory()
     manager.save_manager=SaveManager(folder.name)
     manager.preferences=Preferences(path=None)
@@ -40,6 +42,10 @@ def verify(app):
     application.calculate_dt=False
     def frames(count=1):
         for _ in range(count):
+            if app.win.get_properties().get_minimized() or not app.win.is_active():
+                properties=WindowProperties();properties.set_minimized(False);properties.set_foreground(True)
+                app.win.request_properties(properties)
+                app.win.set_active(True)
             time.dt=time.dt_unscaled=1/60
             app.taskMgr.step()
             app.graphicsEngine.render_frame()
@@ -71,6 +77,7 @@ def verify(app):
         return dict(entities=sum(not e.is_empty() for e in scene.entities),colliders=len(scene.collidables),
                     house_colliders=sum(e.has_ancestor(house) or e==house for e in scene.collidables),
                     cached_audio_clips=len(getattr(audio,'sounds',{})),
+                    window_active=app.win.is_active(),window_minimized=app.win.get_properties().get_minimized(),
                     lights=app.render.get_state().get_attrib(LightAttrib).get_num_on_lights(),
                     geoms=graph.get_num_geoms(),vertices=graph.get_num_vertices(),
                     pooled_texture_ram_bytes=sum(tex.get_ram_image_size() for tex in textures),**memory())
@@ -125,6 +132,25 @@ def verify(app):
         assert horror.start_event('power_dip')
         report['paranormal']=timed('paranormal')
         horror.cancel_active()
+        if '--event-profile' in sys.argv:
+            from game.systems.horror_manager import EVENTS
+            event_reports={}
+            g.enabled=False
+            for event in EVENTS:
+                room='main_hall' if event.name=='hallway_dim' else 'living'
+                p.position=Vec3(*h.level.navigation['nodes'][room])
+                p.rotation_y=0;p.camera_pivot.rotation_x=0;camera.rotation=Vec3(0,0,0)
+                # Apparitions disappear in the beam by design, so only these
+                # two cases turn it off. Other events keep default illumination.
+                p.flashlight_on=event.category!='apparition'
+                p._set_flashlight_light(p.flashlight_on)
+                horror.next_allowed=0;horror.director.quiet_until=0;horror.director.tension=.7
+                assert horror.start_event(event.name),event.name
+                event_reports[event.name]=timed(event.name,90)
+                event_reports[event.name]['flashlight_on']=p.flashlight_on
+                horror.cancel_active()
+            report['events']=event_reports
+            g.enabled=True;p.position=Vec3(0,0,-7);p.flashlight_on=True;p._set_flashlight_light(True)
         manager.begin_jumpscare();frames(15)
         report['jumpscare']=timed('jumpscare',70)
         capture('jumpscare')
@@ -186,6 +212,7 @@ if __name__=='__main__':
         import importlib.util
         import subprocess
         root=Path(__file__).resolve().parents[2]
+        source_commit=sys.argv[sys.argv.index('--source-commit')+1] if '--source-commit' in sys.argv else 'a1ce83a'
         class CommittedSource(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             def find_spec(self, fullname, path=None, target=None):
                 if not fullname.startswith('game.') or fullname.startswith('game.tests'):
@@ -195,7 +222,7 @@ if __name__=='__main__':
                 relative += '/__init__.py' if package else '.py'
                 if not (root/relative).is_file():
                     return None
-                result=subprocess.run(['git','show','a1ce83a:'+relative],cwd=root,capture_output=True)
+                result=subprocess.run(['git','show',source_commit+':'+relative],cwd=root,capture_output=True)
                 if result.returncode:
                     raise ImportError('Baseline module missing: '+relative)
                 spec=importlib.util.spec_from_loader(fullname,self,is_package=package)

@@ -1,6 +1,18 @@
 {
   "version": 1,
   "assets": {
+    "apparition_geometry": {
+      "kind": "model", "path": null,
+      "generator": "game/systems/asset_manager.py:apparition_mesh",
+      "origin": "Original cached baked geometric silhouette",
+      "license": "LicenseRef-ProjectOriginal", "attribution": null
+    },
+    "story_details": {
+      "kind": "model", "path": null,
+      "generator": "game/world/house.py:_build_story_details",
+      "origin": "Original baked photograph frame, portrait, ribbon, case and scratches",
+      "license": "LicenseRef-ProjectOriginal", "attribution": null
+    },
     "wood": {
       "kind": "texture",
       "path": null,

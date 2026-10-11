@@ -25,11 +25,11 @@ class GhostVisual(Entity):
         part('collar',self.torso,(0,.57,-.01),(.32,.12,.29),color.rgb32(48,52,49))
         self.head=part('head',self.torso,(.025,.80,0),(.30,.44,.30),pale,'sphere')
         # Hollow sockets and a long dark mouth face the ghost's +Z forward.
-        for x in (-.07,.07):
-            Entity(parent=self.head,model='cube',shader=None,position=(x,.035,.142),
-                   scale=(.065,.065,.027),color=color.rgb32(9,12,11))
-        Entity(parent=self.head,model='cube',shader=None,position=(0,-.105,.142),
-               scale=(.04,.10,.027),color=color.rgb32(27,30,28))
+        # Sockets and mouth always move together with the head. Bake their
+        # original shapes/tints once, reducing three draws to one geometry.
+        face = [((x,.035,.142),(.065,.065,.027),(9,12,11)) for x in (-.07,.07)]
+        face.append(((0,-.105,.142),(.04,.10,.027),(27,30,28)))
+        Entity(parent=self.head,model=assets.box_mesh('ghost_face',face),shader=None)
         for side in (-1,1):
             arm=Entity(parent=self.torso,shader=None,position=(side*.28,.45,0))
             Entity(parent=arm,model='cube',shader=None,y=-.35,scale=(.11,.78,.12),color=cloth,texture=assets.texture('fabric'))
