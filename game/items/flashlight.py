@@ -17,4 +17,5 @@ class FlashlightPickup(Item):
 
     def interact(self, player):
         player.obtain_flashlight()
+        player.feedback()
         destroy(self)

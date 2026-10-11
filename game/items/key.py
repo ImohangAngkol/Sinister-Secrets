@@ -40,4 +40,5 @@ class KeyPickup(Item):
             f"Picked up: {self.key_name}"
         )
 
+        player.feedback()
         destroy(self)

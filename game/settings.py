@@ -128,6 +128,12 @@ PREFERENCE_DEFAULTS = {
     "ghost_difficulty": "standard",
     "fps_cap": 0,
     "text_scale": 1.0,
+    "texture_quality": "standard",
+    "decorative_detail": "standard",
+    "camera_bob": .25,
+    "master_volume": .7,
+    "ambience_volume": .35,
+    "sfx_volume": .65,
     "bindings": BINDING_DEFAULTS,
 }
 PREFERENCE_CHOICES = {
@@ -141,6 +147,12 @@ PREFERENCE_CHOICES = {
     "ghost_difficulty": ("relaxed", "standard", "hard"),
     "fps_cap": (0, 30, 60, 120),
     "text_scale": (1.0, 1.25, 1.5),
+    "texture_quality": ("low", "standard"),
+    "decorative_detail": ("low", "standard"),
+    "camera_bob": (0., .25, .5, 1.),
+    "master_volume": (0., .25, .5, .7, 1.),
+    "ambience_volume": (0., .25, .35, .5, 1.),
+    "sfx_volume": (0., .25, .5, .65, 1.),
 }
 NEXT_GAME_SETTINGS = ("shadow_quality", "ghost_difficulty")
 GHOST_DIFFICULTY = {"relaxed": (.85, .8), "standard": (1., 1.), "hard": (1.1, 1.2)}
@@ -152,7 +164,9 @@ def validate_preferences(values):
         raise ValueError("Unknown preference or invalid configuration")
     result = deepcopy(PREFERENCE_DEFAULTS)
     bounds = {"mouse_sensitivity": (.25, 3), "brightness": (.5, 2),
-              "horror_frequency": (0, 3), "jumpscare_intensity": (0, 1)}
+              "horror_frequency": (0, 3), "jumpscare_intensity": (0, 1),
+              "camera_bob": (0, 1), "master_volume": (0, 1),
+              "ambience_volume": (0, 1), "sfx_volume": (0, 1)}
     for key, value in values.items():
         if key == 'bindings':
             result[key] = validate_bindings(value)

@@ -28,6 +28,7 @@ class InventoryPickup(Item):
         player.hud.show_message(f"Collected: {self.definition['name']}")
         player.progression.refresh()
         player.hud.refresh_inventory(player)
+        player.feedback()
         destroy(self)
         if self.definition["type"] == "note":
             player.hud.panel.open_note(player, self.item_id)

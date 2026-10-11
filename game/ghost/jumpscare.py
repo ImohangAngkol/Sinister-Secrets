@@ -3,6 +3,8 @@ import math
 from ursina import Entity, Vec3, camera, color, destroy, scene
 from ursina.shaders import unlit_shader
 from game import settings
+from game.ghost.ghost_visual import GhostVisual
+from game.systems.horror_manager import destroy_temporary
 
 
 class Jumpscare:
@@ -31,20 +33,12 @@ class Jumpscare:
         self.saved_rotation = Vec3(camera.world_rotation)
         self.saved_fov = camera.fov
         camera.world_parent = scene
-        # A presentation proxy reuses the ghost's cube shape; the real ghost
-        # stays at its legitimate catch location, with navigation disabled.
-        self.proxy = Entity(parent=camera, model='cube', shader=unlit_shader,
-                            position=(0,-.12,2.4), scale=(.65,1.25,.45), collider=None,
-                            color=color.rgb32(79,118,124))
-        # A wardrobe catch can place the world camera behind a cabinet face.
-        # Composite this presentation mesh after world geometry so that face
-        # cannot hide the encounter; real ghost geometry never moves/clips.
-        self.proxy.set_bin('fixed',40)
-        self.proxy.set_depth_test(False)
-        self.proxy.set_depth_write(False)
-        for x in (-.14,.14):
-            Entity(parent=self.proxy,model='cube',shader=unlit_shader,
-                   position=(x,.22,-.51),scale=(.12,.065,.025),color=color.rgb32(8,11,13))
+        # Presentation-only humanoid; the real catch position and hitbox stay fixed.
+        self.proxy = Entity(parent=camera, shader=unlit_shader,
+                            position=(0,-1.45,2.4), collider=None)
+        self.visual = GhostVisual(parent=self.proxy, cinematic=True, rotation_y=180)
+        if getattr(self,'audio',None):
+            self.audio.play('capture', gain=self.intensity, cooldown=2)
         self.overlay = Entity(parent=camera.ui,model='quad',scale=(camera.aspect_ratio,1),
                               z=-.2,color=color.rgba(0,0,0,0))
 
@@ -60,6 +54,7 @@ class Jumpscare:
         fraction = self.elapsed/self.duration
         approach = max(0,min(1,(fraction-.2)/.5))
         approach = approach*approach*(3-2*approach)
+        self.visual.advance(dt,state='capture')
         self.proxy.z = 2.4-1.1*self.intensity*approach
         shake = settings.JUMPSCARE_SHAKE_DEGREES*self.intensity
         if getattr(self, 'preference_reduced_shake', settings.JUMPSCARE_REDUCED_SHAKE):
@@ -76,9 +71,7 @@ class Jumpscare:
 
     def cancel(self):
         if self.proxy is not None and not self.proxy.is_empty():
-            for child in reversed(self.proxy.children):
-                destroy(child)
-            destroy(self.proxy)
+            destroy_temporary(self.proxy)
         if self.overlay is not None and not self.overlay.is_empty():
             destroy(self.overlay)
         if self.active:
@@ -86,4 +79,7 @@ class Jumpscare:
             camera.world_rotation = self.saved_rotation
             camera.fov = self.saved_fov
         self.proxy = self.overlay = None
+        self.visual = None
+        if getattr(self,'audio',None):
+            self.audio.stop('capture')
         self.active = False

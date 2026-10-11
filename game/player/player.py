@@ -29,6 +29,7 @@ from game.player.interaction import (
     update_interaction_prompt,
 )
 from game.player.player_stats import PlayerStats
+from game.player.camera_presentation import CameraPresentation
 from game.settings import BINDING_DEFAULTS
 from game.settings import (
     FLASHLIGHT_DRAIN_PER_SECOND,
@@ -110,13 +111,15 @@ class HorrorPlayer(FirstPersonController):
             FLASHLIGHT_SHADOWS, FLASHLIGHT_SHADOW_RESOLUTION, FLASHLIGHT_SHADOW_RESOLUTION)
         self.cursor.color = color.white
 
+        self.presentation = CameraPresentation(self)
+        self.audio = None
         self.hud.refresh_inventory(self)
 
     def update(self):
         # Translate only the controller's movement keys while it runs. Restore
         # raw held keys afterward so menu/modal input remains independent.
         if self.bindings == BINDING_DEFAULTS:
-            return self._update_player()
+            return self._advance_player()
         aliases = {'shift': ('shift','left shift','right shift'),
                    'control': ('control','left control','right control')}
         translated = {}
@@ -129,10 +132,26 @@ class HorrorPlayer(FirstPersonController):
         try:
             for key in keys:
                 held_keys[key] = translated.get(key, 0)
-            return self._update_player()
+            return self._advance_player()
         finally:
             for key, value in before.items():
                 held_keys[key] = value
+
+    def _advance_player(self):
+        before = Vec3(self.world_position)
+        self._update_player()
+        after = self.world_position
+        travel = ((after.x-before.x)**2+(after.z-before.z)**2)**.5
+        if self.hidden or self.hud.panel.active:
+            travel = 0
+        self.presentation.update(time.dt, travel)
+        if self.audio:
+            self.audio.footsteps(travel, sprinting=self.sprinting, crouching=self.crouching)
+
+    def feedback(self, sound='pickup'):
+        if self.audio:
+            self.audio.play(sound, gain=.6)
+        self.presentation.react(.12)
 
     def _update_player(self):
         # Ursina's controller uses short rays. Substeps prevent sprinting through
@@ -365,6 +384,8 @@ class HorrorPlayer(FirstPersonController):
         self._flicker_active = False
 
         self._set_flashlight_light(self.flashlight_on)
+        if self.audio:
+            self.audio.play("select", gain=.35, cooldown=.1)
         self.hud.refresh_inventory(self)
 
     def add_battery(self, amount: float):
@@ -383,6 +404,7 @@ class HorrorPlayer(FirstPersonController):
             f"{int(self.stats.battery)}%."
         )
 
+        self.feedback("battery")
         self.hud.refresh_inventory(self)
         return True
 
@@ -447,6 +469,7 @@ class HorrorPlayer(FirstPersonController):
         self.hud.refresh_inventory(self)
 
     def cleanup(self):
+        self.presentation.reset()
         self.hud.panel.close()
         if self.hidden:
             self.hiding_spot.occupant = None

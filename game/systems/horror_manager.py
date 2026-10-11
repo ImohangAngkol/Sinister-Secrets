@@ -193,7 +193,7 @@ class HorrorManager:
                 # Decorative door on an already solid furniture assembly. It
                 # cannot open a route, change locks, or move its collider.
                 leaf = Entity(parent=prop, model='cube', shader=None, origin_x=-.5,
-                              position=(-.5,.85,-.36), scale=(1,1.6,.045), color=color.rgb32(72,57,45))
+                              position=(-.5,.85,-.36), scale=(1,1.6,.045), color=color.rgb32(72,57,45), texture=self.house.assets.texture("wood",self.house._presentation_quality))
                 active['temporary'].append(leaf)
                 active['transforms'].append((leaf,Vec3(leaf.position),Vec3(leaf.rotation)))
             else:
@@ -209,6 +209,13 @@ class HorrorManager:
             silhouette.look_at_2d(self.player.world_position,'y')
             active['temporary'].append(silhouette)
             active['transforms'].append((silhouette,Vec3(silhouette.position),Vec3(silhouette.rotation)))
+        if getattr(self,'audio',None):
+            cue = ('creak' if name=='cabinet_creak' else 'knock' if definition.category=='environment'
+                   else 'presence' if definition.category=='apparition' else None)
+            if cue:
+                self.audio.play(cue, gain=.35*intensity, cooldown=12)
+        if definition.category=='environment' and hasattr(self.player,'presentation'):
+            self.player.presentation.react(.15*intensity)
         self.history.append((round(self.clock,6),name,room.room_id,round(intensity,6)))
         self.last_event = self.clock
         return True

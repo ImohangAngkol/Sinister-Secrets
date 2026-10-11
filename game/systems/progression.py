@@ -38,6 +38,7 @@ class Progression:
         for name, completed in (('fuse_box',self.power_restored),('lockbox',self.safe_unlocked)):
             if completed:
                 prop = self.house.puzzles[name]
+                prop.set_completed(True, animate=False)
                 prop.color = prop.powered_color
                 prop.interaction_text = '[E] Electrical box (powered)' if name=='fuse_box' else '[E] Lockbox (opened)'
         self.house.puzzles['boards'].enabled = not self.boards_removed
@@ -51,6 +52,8 @@ class Progression:
             self.player.hud.show_message("A fuse is missing. Search the storage room.")
             return False
         self.power_restored = True
+        self.house.puzzles["fuse_box"].set_completed(True, animate=True)
+        self.player.feedback("fuse")
         self.house.pickups["kitchen_tally"].enabled = True
         self.house.puzzles["fuse_box"].color = self.house.puzzles["fuse_box"].powered_color
         self.house.puzzles["fuse_box"].interaction_text = "[E] Electrical box (powered)"
@@ -70,6 +73,8 @@ class Progression:
         if not self.player.inventory.add("crowbar"):
             return False
         self.safe_unlocked = True
+        self.house.puzzles["lockbox"].set_completed(True, animate=True)
+        self.player.feedback("lockbox")
         self.house.puzzles["lockbox"].color = self.house.puzzles["lockbox"].powered_color
         self.house.puzzles["lockbox"].interaction_text = "[E] Lockbox (opened)"
         self.player.hud.show_message("Lockbox opened. Crowbar collected; it can pry the bedroom boards.")
@@ -84,6 +89,8 @@ class Progression:
             self.player.hud.show_message("These boards need a crowbar. Investigate the dining lockbox.")
             return False
         self.boards_removed = True
+        self.house.puzzles["boards"].release_boards()
+        self.player.feedback("crowbar")
         self.house.puzzles["boards"].enabled = False
         self.house.pickups["bedroom_exit_key"].enabled = True
         self.player.hud.show_message("Boards removed. The exit key is inside. Crowbar kept.")

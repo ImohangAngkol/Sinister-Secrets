@@ -4,6 +4,7 @@ from game.world.house import House
 from game.world.environment import create_environment
 from game.systems.progression import Progression
 from game.systems.horror_manager import HorrorManager
+from game.systems.audio_manager import AudioManager
 from ursina import application, camera, destroy, scene
 
 
@@ -52,8 +53,13 @@ class SceneManager:
         self.player.ghost_ai = self.ghost.ai
         self.horror = HorrorManager(self.house,self.player,self.ghost,self.lights)
         self.player.horror = self.horror
+        self.audio = AudioManager()
+        self.player.audio = self.ghost.audio = self.horror.audio = self.ghost.jumpscare.audio = self.audio
+        for name in self.house.level.doors:
+            getattr(self.house, name).audio = self.audio
 
     def stop_gameplay(self):
+        self.audio.stop_all()
         self.horror.stop()
         self.ghost.jumpscare.cancel()
         self.player.cleanup()
@@ -63,6 +69,7 @@ class SceneManager:
 
     def dispose(self):
         self.stop_gameplay()
+        self.audio.close()
         camera.world_parent = scene
         for light in (*self.lights, self.player.flashlight_light):
             application.base.render.clear_light(light.get_children()[0])

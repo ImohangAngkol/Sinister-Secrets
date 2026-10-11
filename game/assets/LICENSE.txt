@@ -1,0 +1,8 @@
+Original Sinister Secrets procedural presentation assets.
+
+These textures, geometric assemblies, and synthesized sounds were created for
+this project without third-party source assets or sampled recordings. Rights
+remain with the project authors; no external attribution is required. This
+asset notice does not change the license of the existing project or engines.
+Ursina/Panda3D packaged primitives remain covered by their engine licenses.
+Manifest license identifier: LicenseRef-ProjectOriginal.

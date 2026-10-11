@@ -25,4 +25,5 @@ class BatteryPickup(Item):
         if player.inventory.add("battery"):
             player.hud.show_message("Battery stored. Tab: inventory; U then Enter: use.")
             player.hud.refresh_inventory(player)
+            player.feedback()
             destroy(self)

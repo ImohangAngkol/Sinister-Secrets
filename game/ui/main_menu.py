@@ -156,7 +156,9 @@ class ControlsScreen(MenuScreen):
 class SettingsMenu(MenuScreen):
     LABELS = ("Mouse sensitivity", "Visibility brightness", "Flashlight shadows *",
               "Horror frequency", "Reduced flicker (horror/torch)", "Reduced camera shake",
-              "Jumpscare intensity", "Ghost difficulty *", "FPS cap", "UI text size")
+              "Jumpscare intensity", "Ghost difficulty *", "FPS cap", "UI text size",
+              "Texture quality", "Decorative detail", "Camera bob / sway",
+              "Master volume", "Ambience volume", "SFX volume")
 
     def __init__(self, manager):
         self.manager = manager
@@ -199,7 +201,7 @@ class SettingsMenu(MenuScreen):
                 value = "On" if value else "Off"
             elif key == "fps_cap" and value == 0:
                 value = "Unlimited"
-            elif key == 'text_scale':
+            elif key in ('text_scale','camera_bob','master_volume','ambience_volume','sfx_volume'):
                 value = f'{int(value*100)}%'
             elif key == "shadow_quality":
                 value = {"off": "Off (light leaks)", "low": "Low / 512", "high": "High / 1024"}[value]

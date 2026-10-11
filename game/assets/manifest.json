@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "assets": {
+    "wood": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "wallpaper": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "plaster": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "fabric": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "metal": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "tile": {
+      "kind": "texture",
+      "path": null,
+      "generator": "game/systems/asset_manager.py:procedural_texture",
+      "seed": 1729,
+      "origin": "Original deterministic project material",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "ghost_model": {
+      "kind": "model",
+      "path": null,
+      "generator": "game/ghost/ghost_visual.py",
+      "origin": "Original procedural humanoid assembly using engine primitives",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null
+    },
+    "ambience": {
+      "kind": "audio",
+      "path": "audio/ambient/ambience.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "ambience"
+    },
+    "tension": {
+      "kind": "audio",
+      "path": "audio/ambient/tension.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "ambience"
+    },
+    "step": {
+      "kind": "audio",
+      "path": "audio/footsteps/step.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "creak": {
+      "kind": "audio",
+      "path": "audio/ambient/creak.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "ambience"
+    },
+    "knock": {
+      "kind": "audio",
+      "path": "audio/ambient/knock.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "ambience"
+    },
+    "presence": {
+      "kind": "audio",
+      "path": "audio/ghost/presence.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "search": {
+      "kind": "audio",
+      "path": "audio/ghost/search.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "inspect": {
+      "kind": "audio",
+      "path": "audio/ghost/inspect.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "capture": {
+      "kind": "audio",
+      "path": "audio/ghost/capture.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "door": {
+      "kind": "audio",
+      "path": "audio/interactions/door.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "fuse": {
+      "kind": "audio",
+      "path": "audio/interactions/fuse.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "lockbox": {
+      "kind": "audio",
+      "path": "audio/interactions/lockbox.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "crowbar": {
+      "kind": "audio",
+      "path": "audio/interactions/crowbar.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "pickup": {
+      "kind": "audio",
+      "path": "audio/interactions/pickup.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "battery": {
+      "kind": "audio",
+      "path": "audio/interactions/battery.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    },
+    "select": {
+      "kind": "audio",
+      "path": "audio/interactions/select.wav",
+      "generator": "game/assets/generate_audio.py",
+      "seed": 1729,
+      "origin": "Original synthesized PCM; no sampled recordings",
+      "license": "LicenseRef-ProjectOriginal",
+      "attribution": null,
+      "channel": "sfx"
+    }
+  }
+}

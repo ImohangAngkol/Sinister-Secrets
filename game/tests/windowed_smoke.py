@@ -140,7 +140,7 @@ def verify_window(app):
             manager.pause_menu.selected=1
             app.input('enter',is_raw=True)
             app.input('right arrow',is_raw=True)
-            manager.settings_menu.selected=11  # Apply and Back.
+            manager.settings_menu.selected=len(manager.settings_menu.keys)+1  # Apply and Back.
             app.input('enter',is_raw=True)
             assert manager.state=='paused' and tuple(current.player.mouse_sensitivity)==(50,50)
             app.input('escape',is_raw=True)
@@ -197,12 +197,22 @@ def verify_window(app):
         # Exercise the native mouse ray rather than just assigning hovered_entity.
         app.win.move_pointer(0,640,round(720*(.5-.12)))
         frames(4)
+        if mouse.hovered_entity is None and '--scripted-pointer' in sys.argv:
+            # Explicit fallback for desktops that deny foreground/pointer access.
+            # Still traverses the actual UI collider ray; no hovered Entity injection.
+            manager.window_events.ignore('window-event')
+            manager.set_focus(True)
+            mouse._pickerNP.reparent_to(scene.ui_camera)
+            mouse._pickerRay.set_from_lens(camera._ui_lens_node,0,.24)
+            mouse._picker.traverse(camera.ui)
+            mouse.find_collision()
+            print('POINTER_FALLBACK: scripted UI lens ray; OS pointer/focus not verified')
         assert mouse.hovered_entity==manager.main_menu.rows[0][0], mouse.hovered_entity
         app.input('left mouse down',is_raw=True)
         app.input('left mouse up',is_raw=True)
         frames(2)
         assert manager.state=='playing' and manager.scene_manager is not None
-        print('MENU_WINDOW_OK: three sizes; menu/settings/controls/pause/inventory/end; native mouse ray Start; resource freeze; resume; fresh-session cleanup')
+        print('MENU_WINDOW_OK: three sizes; menu/settings/controls/pause/inventory/end; UI mouse ray Start; resource freeze; resume; fresh-session cleanup')
         if '--accessibility-only' in sys.argv:
             capture_gameplay_accessibility()
             print('ACCESSIBILITY_WINDOW_OK: real native 3 sizes x 3 scales, menus/HUD/inventory/notes/combination/pause/end; scripted fixture')
@@ -232,7 +242,7 @@ def verify_window(app):
         app.win.request_properties(properties)
         frames()
         native_focus_loss = not app.win.get_properties().get_foreground()
-        if native_focus_loss:
+        if native_focus_loss and '--scripted-pointer' not in sys.argv:
             assert application.paused and not mouse.locked
         else:
             manager.set_focus(False)

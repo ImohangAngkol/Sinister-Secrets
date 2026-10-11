@@ -2808,5 +2808,144 @@ class PrototypeTests(unittest.TestCase):
         self.assertIn(2,self.manager.end_screen.disabled_rows)
         self.assertFalse(self.manager.retry_checkpoint())
 
+
+    def test_presentation_model_loading_cache_and_missing_file_fallback(self):
+        import json
+        from game.systems.asset_manager import AssetManager
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            probe=Entity(model='cube',visible=False,collider=None)
+            self.assertTrue(probe.model.write_bam_file(Filename.from_os_specific(str(root/'sample.bam'))))
+            (root/'manifest.json').write_text(json.dumps(dict(version=1,assets={
+                'sample':dict(kind='model',path='sample.bam'),
+                'missing':dict(kind='model',path='missing.obj')})))
+            assets=AssetManager(root)
+            model=assets.model('sample')
+            self.assertFalse(model.is_empty())
+            self.assertIs(assets.model('sample'),model)
+            self.assertEqual(assets.model('missing'),'cube')
+            self.assertEqual(set(root.iterdir()),{root/'sample.bam',root/'manifest.json'})
+            destroy(probe)
+
+    def test_presentation_materials_are_lit_cached_and_detail_has_no_colliders(self):
+        assets=self.house.assets
+        self.assertGreaterEqual(len(self.house.material_surfaces),100)
+        self.assertTrue(all(e.texture and e.shader is None for e in self.house.material_surfaces))
+        colliders=set(scene.collidables)
+        for quality in ('low','standard','low','standard'):
+            values=dict(self.manager.preferences.values,texture_quality=quality,decorative_detail='low')
+            self.house.apply_presentation(values)
+            self.assertFalse(self.house.decorations.enabled)
+            self.assertEqual(set(scene.collidables),colliders)
+        self.assertLessEqual(assets.metrics()['procedural_texture_count'],12)
+        self.assertLess(assets.metrics()['procedural_texture_ram_bytes'],1024*1024)
+        for node,neighbors in self.house.graph.items():
+            for neighbor in neighbors:
+                self.assertTrue(self.ghost.ai.navigation.segment_clear(self.house.nav_nodes[node],self.house.nav_nodes[neighbor]))
+
+    def test_presentation_ghost_animation_preserves_hitbox_and_all_ai_states(self):
+        visual=self.ghost.visual
+        position=Vec3(self.ghost.position)
+        collider=self.ghost.collider
+        for state in GhostState:
+            visual.advance(.25,displacement=.3,state=state)
+            self.assertEqual(self.ghost.position,position)
+            self.assertIs(self.ghost.collider,collider)
+            self.assertTrue(all(e.collider is None for e in descendants(visual)))
+        visual.advance(.25,state=GhostState.SEARCH,inspection=True)
+        self.assertEqual(visual.animation_state,'inspection')
+        self.assertLess(visual.joints['arm1'].rotation_x,-20)
+        visual.reset()
+        self.assertEqual(visual.animation_state,'idle')
+        self.assertEqual(visual.clock,0)
+        self.assertEqual(visual.head.rotation,Vec3(0,0,0))
+
+    def test_presentation_animation_clock_and_stride_at_four_frame_rates(self):
+        visual=self.ghost.visual
+        results=[]
+        for fps in (4,30,60,120):
+            visual.reset()
+            for _ in range(fps*2):visual.advance(1/fps,displacement=2/fps,state=GhostState.CHASE)
+            results.append((visual.clock,visual.phase,visual.amount))
+        for result in results:
+            for actual,expected in zip(result,results[0]):self.assertAlmostEqual(actual,expected,places=5)
+
+    def test_presentation_motion_is_optional_and_beam_has_no_aim_delay(self):
+        self.player.obtain_flashlight();self.player.toggle_flashlight()
+        self.player.position=Vec3(0,0,-10);self.player.rotation_y=0
+        self.player.presentation.configure(dict(self.manager.preferences.values,camera_bob=1))
+        collider=self.player.collider
+        self.move('w',.25,1/60)
+        self.assertGreater(camera.position.length(),.001)
+        self.assertEqual(self.player.flashlight_light.world_position,camera.world_position)
+        self.assertEqual(self.player.flashlight_light.world_rotation,camera.world_rotation)
+        self.assertIs(self.player.collider,collider)
+        self.player.presentation.configure(dict(self.manager.preferences.values,camera_bob=1,reduced_shake=True))
+        self.player.presentation.react(1)
+        self.player.presentation.update(.1,1)
+        self.assertEqual(camera.position,Vec3(0,0,0))
+        self.assertEqual(self.player.presentation.handheld.rotation_z,0)
+
+    def test_presentation_puzzle_visuals_finish_and_restore_without_replaying_rewards(self):
+        self.player.inventory.add('fuse')
+        self.assertTrue(self.player.progression.install_fuse())
+        fuse=self.house.puzzles['fuse_box']
+        self.assertTrue(fuse.moving)
+        time.dt=.45;fuse.update()
+        self.assertFalse(fuse.moving)
+        self.assertAlmostEqual(fuse.leaf.rotation_y,-12)
+        self.assertTrue(self.player.progression.try_combination(self.house.level.house['progression']['combination']))
+        box=self.house.puzzles['lockbox']
+        time.dt=.5;box.update()
+        self.assertAlmostEqual(box.leaf.rotation_y,-75)
+        inventory=dict(self.player.inventory.quantities)
+        self.player.progression.restore(dict(power_restored=True,safe_unlocked=True,boards_removed=False),[])
+        self.assertEqual(self.player.inventory.quantities,inventory)
+        self.assertFalse(box.moving)
+        self.assertAlmostEqual(box.leaf.rotation_y,-75)
+        self.assertEqual(fuse.indicator.color,fuse.powered_color)
+        self.assertTrue(self.player.progression.remove_boards())
+        from game.world.puzzles import BoardFragment
+        fragments=[e for e in scene.entities if isinstance(e,BoardFragment)]
+        self.assertEqual(len(fragments),2)
+        self.assertTrue(all(e.collider is None for e in fragments))
+        time.dt=.5
+        for fragment in fragments:fragment.update()
+        self.assertTrue(all(e.is_empty() for e in fragments))
+
+    def test_presentation_save_load_resets_motion_audio_and_animation(self):
+        self.persistence_fixture()
+        self.player.presentation.update(.3,1)
+        self.ghost.visual.advance(.3,displacement=1,state=GhostState.CHASE)
+        self.manager.scene_manager.audio.update(.3)
+        previous_audio=self.manager.scene_manager.audio
+        document=self.manager.save_manager.capture(self.manager.scene_manager,self.manager.session_id)
+        self.manager.save_manager.save(document)
+        self.manager.pause_game()
+        self.assertTrue(self.manager.load_game())
+        self.rebind_session_refs()
+        self.assertTrue(previous_audio.closed)
+        self.assertFalse(previous_audio.playing)
+        self.assertEqual(camera.position,Vec3(0,0,0))
+        self.assertEqual(self.ghost.visual.clock,0)
+        self.assertFalse(self.manager.scene_manager.audio.playing)
+        self.assertTrue(self.house.puzzles['fuse_box'].completed)
+
+    def test_presentation_audio_disposal_on_restart_and_terminal_menu(self):
+        sm=self.manager.scene_manager
+        sm.audio.update(.5)
+        old_audio=sm.audio
+        self.manager.restart_game()
+        self.rebind_session_refs()
+        self.assertTrue(old_audio.closed)
+        self.assertFalse(old_audio.sounds)
+        current=self.manager.scene_manager.audio
+        self.manager.begin_jumpscare()
+        self.ghost.jumpscare.update(.2)
+        self.assertTrue(self.ghost.jumpscare.visual.cinematic)
+        self.manager.return_to_menu()
+        self.assertTrue(current.closed)
+        self.assertFalse(current.playing)
+
 if __name__ == "__main__":
     unittest.main()

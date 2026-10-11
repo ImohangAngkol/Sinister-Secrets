@@ -32,6 +32,8 @@ class Door(Entity):
         if self.opened or self.opening:
             return
 
+        if getattr(self,'audio',None):
+            self.audio.play('door', position=self.world_position, gain=.7)
         self.opening = True
         self.closed_rotation_y = self.rotation_y
         # The panel collider rotates with the visual. A fixed doorway collider

@@ -38,9 +38,11 @@ class Room(Entity):
         self.room_bounds = definition["bounds"]
         self.props = []
         x0, z0, x1, z1 = self.room_bounds
-        Entity(parent=self, model="cube", shader=None, collider="box",
+        self.floor = Entity(parent=self, model="cube", shader=None, collider="box",
                position=((x0 + x1) / 2, -0.15, (z0 + z1) / 2),
                scale=(x1 - x0, 0.3, z1 - z0), color=color.rgb32(*definition["floor"]))
+        self.floor.material_name = 'tile' if self.room_id in ('bathroom','kitchen') else 'wood'
+        self.floor.material_scale = ((x1-x0)/3, (z1-z0)/3)
         self.sign = Text(parent=self, text=self.title.upper(), origin=(0, 0),
                          position=((x0 + x1) / 2, 2.7, z1 - 0.18),
                          scale=5, color=color.rgb32(194, 187, 169))
@@ -70,8 +72,12 @@ class Room(Entity):
         tint = definition.get("tint", [87, 72, 60])
 
         def cube(position, scale, rgb=tint):
-            return Entity(parent=prop, model="cube", shader=None, position=position,
-                          scale=scale, color=color.rgb32(*rgb))
+            visual = Entity(parent=prop, model="cube", shader=None, position=position,
+                            scale=scale, color=color.rgb32(*rgb))
+            visual.material_name = ('fabric' if kind in ('sofa','chair') or kind=='bed' and list(rgb)!=[65,55,50] else
+                                    'tile' if kind in ('bath','sink') else 'wood')
+            visual.material_scale = (max(.5,scale[0]), max(.5,scale[1]))
+            return visual
 
         if definition.get("hiding"):
             # Same footprint/collider as the old wardrobe. Hollow geometry

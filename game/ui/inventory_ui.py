@@ -183,6 +183,9 @@ class GameplayPanel(Entity):
         self.layout(self.parent._aspect)
 
     def handle(self, key):
+        if key in ('up arrow','down arrow','enter','backspace') or key.isdigit():
+            if getattr(self.player,'audio',None):
+                self.player.audio.play('select', gain=.25, cooldown=.08)
         if key in ('escape',self.player.bindings['inventory']):
             self.close()
             return

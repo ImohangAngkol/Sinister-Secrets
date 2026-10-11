@@ -12,6 +12,7 @@ from game.ui.hud import HUD
 from game.ui.main_menu import MainMenu, ControlsScreen, SettingsMenu, MenuScreen
 from game.ui.pause_menu import PauseMenu
 from game.systems.save_manager import SaveManager, SaveError
+from game.systems.audio_manager import AudioManager
 from game.systems.horror_manager import destroy_temporary
 from game.ghost.ghost_states import GhostState
 
@@ -27,6 +28,8 @@ class GameManager(Entity):
         self._submenu_stack = []
         self.state = "menu"
         self.scene_manager = None
+        self.menu_audio = AudioManager()
+        self.menu_audio.set_paused(False)
         self._focused = True
         self._focus_paused = False
         self._skip_resume_frame = False
@@ -48,11 +51,17 @@ class GameManager(Entity):
                         'confirm_new': self.new_game_confirmation}
         self.window_events = DirectObject()
         self.window_events.accept("window-event", self._window_event)
-        self.on_destroy = self.window_events.ignore_all
+        self.on_destroy = self._cleanup_audio_events
         self._layout_size = None
         self._show_screen("menu")
         self.main_menu.refresh_saves()
         self.apply_live_preferences()
+
+    def _cleanup_audio_events(self):
+        self.window_events.ignore_all()
+        self.menu_audio.close()
+        if self.scene_manager:
+            self.scene_manager.audio.close()
 
     @staticmethod
     def _clear_input():
@@ -63,6 +72,7 @@ class GameManager(Entity):
         application.paused = not self._focused or self.state not in ("playing", "jumpscare")
         mouse.locked = self._focused and self.state == "playing"
         if self.scene_manager:
+            self.scene_manager.audio.set_paused(application.paused)
             self.scene_manager.player.cursor.enabled = (self.state == "playing"
                                                        and self._focused and not self.hud.panel.active)
         self._clear_input()
@@ -83,6 +93,8 @@ class GameManager(Entity):
         if not self._focused:
             self._clear_input()
             return True
+        if self.state != 'playing' and key in ('up arrow','down arrow','enter','left arrow','right arrow','left mouse down'):
+            self.menu_audio.play('select',gain=.25,cooldown=.08)
         if self.state == "playing":
             if self.hud.panel.active:
                 self.hud.panel.handle(key)
@@ -392,6 +404,7 @@ class GameManager(Entity):
     def apply_live_preferences(self):
         self._apply_fps_cap()
         values = self.preferences.values
+        self.menu_audio.configure(values)
         self.hud.text_scale = values['text_scale']
         self.hud.bindings = values['bindings'].copy()
         for screen in set(self.screens.values()):
@@ -405,6 +418,9 @@ class GameManager(Entity):
         player = self.scene_manager.player
         player.bindings = values['bindings'].copy()
         player.reduced_flicker = values['reduced_flicker']
+        player.presentation.configure(values)
+        self.scene_manager.audio.configure(values)
+        self.scene_manager.house.apply_presentation(values)
         player.mouse_sensitivity = Vec2(40, 40) * values["mouse_sensitivity"]
         horror = self.scene_manager.horror
         horror.cancel_active()
@@ -431,6 +447,7 @@ class GameManager(Entity):
         player.hud.refresh_inventory(player)
 
     def quit_game(self):
+        self.menu_audio.close()
         if self.scene_manager:
             self.scene_manager.dispose()
             self.scene_manager = None
@@ -444,6 +461,7 @@ class GameManager(Entity):
         if self._focused == focused:
             return
         self._focused = focused
+        self.menu_audio.set_paused(not focused)
         if self.scene_manager:
             self.scene_manager.player.stats.noise_level = 0
             if not focused:
@@ -459,6 +477,7 @@ class GameManager(Entity):
         self._sync_pause()
 
     def update(self):
+        self.menu_audio.update(time.dt_unscaled,gameplay=False)
         if self._skip_resume_frame:
             time.dt = time.dt_unscaled = 0
             self._skip_resume_frame = False
@@ -472,6 +491,11 @@ class GameManager(Entity):
             for screen in set(self.screens.values()):
                 screen.resize(aspect)
         if self._focused and not application.paused and self.scene_manager:
+            sm = self.scene_manager
+            sm.audio.update(time.dt, camera.world_position, sm.ghost.ai.state,
+                            sm.horror.director.tension,
+                            quiet=sm.horror.clock < sm.horror.director.quiet_until,
+                            gameplay=self.state == 'playing')
             if self.state == "playing":
                 self.scene_manager.horror.update(time.dt)
                 self._checkpoints()

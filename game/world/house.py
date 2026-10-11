@@ -1,5 +1,6 @@
 """Geometry builder for the fixed, data-authored haunted house."""
-from ursina import Entity, Vec3, color
+from ursina import Entity, Mesh, Vec3, color
+from game.systems.asset_manager import assets
 
 from game.items.battery import BatteryPickup
 from game.items.flashlight import FlashlightPickup
@@ -49,6 +50,63 @@ class House(Entity):
         self._place_items(on_escape)
         self.puzzles = {definition["id"]: PuzzleProp(definition, parent=self)
                         for definition in data["progression"]["props"]}
+        self.assets = assets
+        self._presentation_quality = None
+        self._build_presentation()
+        self.apply_presentation({'texture_quality':'standard','decorative_detail':'standard'})
+
+    def _build_presentation(self):
+        from game.systems.horror_manager import descendants
+        self.decorations = Entity(parent=self, shader=None)
+        vertices, triangles, uvs, normals = [], [], [], []
+        # Bake all skirting into one non-colliding mesh, inside wall footprints.
+        corners = [(-1,-1,-1),(-1,-1,1),(-1,1,-1),(-1,1,1),
+                   (1,-1,-1),(1,-1,1),(1,1,-1),(1,1,1)]
+        faces = [(0,4,6,2),(5,1,3,7),(1,0,2,3),(4,5,7,6),(2,6,7,3),(1,5,4,0)]
+        face_normals = [(0,0,-1),(0,0,1),(-1,0,0),(1,0,0),(0,1,0),(0,-1,0)]
+        for wall in self.walls:
+            center = Vec3(wall.position);center.y = .105
+            size = Vec3(wall.scale);size.y = .21
+            size.x += .035;size.z += .035
+            for face, normal in zip(faces,face_normals):
+                base=len(vertices)
+                for index, uv in zip(face,((0,0),(1,0),(1,1),(0,1))):
+                    c=corners[index]
+                    vertices.append(tuple(center+Vec3(c[0]*size.x/2,c[1]*size.y/2,c[2]*size.z/2)))
+                    uvs.append(uv);normals.append(normal)
+                triangles.extend([(base,base+2,base+1),(base,base+3,base+2)])
+        trim=Entity(parent=self.decorations,shader=None,
+                    model=Mesh(vertices=vertices,triangles=triangles,uvs=uvs,normals=normals),
+                    color=color.rgb32(67,58,49),collider=None)
+        trim.material_name='wood'
+        for wall in self.walls:
+            wall.material_name='wallpaper'
+            wall.material_scale=(max(wall.scale_x,wall.scale_z)/2,wall.scale_y/2)
+        self.ceiling.material_name='plaster'
+        self.ceiling.material_scale=(8,8)
+        for frame in self.door_frames:
+            frame.material_name='wood'
+        for name in self.level.doors:
+            door=getattr(self,name)
+            door.material_name='wood'
+            door.material_scale=(1,2)
+            # Non-colliding metal handle attached to the existing animated leaf.
+            Entity(parent=door,shader=None,model='cube',position=(.83,.52,-.58),
+                   scale=(.10,.025,.18),color=color.rgb32(112,103,78),collider=None)
+        for prop in self.puzzles.values():
+            prop.material_name='wood' if prop.puzzle_id=='boards' else 'metal'
+        self.material_surfaces=[entity for entity in descendants(self) if hasattr(entity,'material_name')]
+
+    def apply_presentation(self, values):
+        quality=values['texture_quality']
+        self.decorations.enabled=values['decorative_detail']=='standard'
+        if quality == self._presentation_quality:
+            return
+        for entity in self.material_surfaces:
+            if not entity.is_empty():
+                entity.texture=self.assets.texture(entity.material_name,quality)
+                entity.texture_scale=getattr(entity,'material_scale',(1,1))
+        self._presentation_quality=quality
 
     def _wall(self, position, scale):
         return Entity(parent=self, model="cube", shader=None, collider="box",

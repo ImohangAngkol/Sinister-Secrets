@@ -49,7 +49,273 @@ The white pickup on the foyer console is the flashlight. Batteries are collected
 into inventory and used deliberately. Read the living-room note to begin the
 fuse, combination, and crowbar sequence below. The yellow exit key remains
 inaccessible until its bedroom cabinet is opened. Unlock the brown north exit
-with E, then walk through the opening to escape. The ghost uses placeholder geometry.
+with E, then walk through the opening to escape. The ghost uses an original jointed procedural humanoid.
+
+## Milestone 8: original materials, animation, and audio
+
+This presentation pass was implemented in `C:\Users\User\Desktop\Sinister_Secrets`,
+on clean `main` at `a1ce83a`. The actual baseline was Milestone 7, with **175 passing
+tests**. No project models, textures, or audio were present: furniture used engine
+primitives, the ghost was a cube, and `AudioManager` was a stub. Existing level
+JSON, navigation/perception/hearing, collision footprints, item placements,
+puzzle solutions, save schema and stable IDs remain the gameplay authority.
+No dependencies or external assets were added. Nothing was committed, pushed,
+merged, renamed, or removed. Earlier milestone sections retain historical results.
+
+### Assets and house presentation
+
+`game/systems/asset_manager.py` resolves an explicit manifest relative to its
+own source, checks extensions, file existence, size and root containment, and
+validates PCM WAV headers. Materials/models and decoded clips are cached; missing
+or invalid assets produce diagnostics and procedural/primitive/silent fallbacks.
+OBJ imports use Ursina's actual `folder` argument without generating BAM files;
+BAM/EGG use the native Panda loader. Windows sound paths use
+`Filename.from_os_specific`, required for real OpenAL playback.
+
+`game/assets/manifest.json` records 23 assets and their origin, generator, seed,
+license and attribution. Six small original albedo textures are generated in
+memory: wood boards/grain, stained/cracked wallpaper, plaster, woven fabric,
+aged metal and tiles. They use mipmaps, repeat UVs and the existing generated
+Panda lighting; they do not emit light. The house has textured floors, walls,
+ceiling, existing furniture, frames, doors and puzzle panels. Skirting is baked
+into one collider-free mesh. Kitchen/bathroom tile and bed upholstery distinguish
+rooms without changing the authored layout or wardrobe viewing slit.
+
+The ghost is an original jointed assembly using packaged cube/sphere primitives,
+with a narrow coat, pale distorted head, dark sockets/mouth, long arms/hands,
+legs and boots. All new presentation geometry is collider-free; the original
+scaled ghost collider remains. Procedural motion covers idle breathing, walking,
+investigation/search scanning, chase stride/lean, wardrobe inspection/reach and
+the existing 1.8-second capture. Time and actual displacement drive the motion;
+state changes blend exponentially. The cinematic reuses this humanoid in camera
+space, explicitly composites over cabinet faces, and recursively cleans its
+children on cancellation/restart. It never relocates the real ghost.
+
+### Motion and interaction feedback
+
+Subtle optional head bob and handheld flashlight sway follow actual horizontal
+travel. Sprint and crouch vary amplitude; the existing stance smoothing and body
+rays still govern crouching. Beam transforms are synchronized to the final camera
+pose in the same frame, preserving mouse aim. Reduced camera shake disables this
+new motion. Animation adds no movement, stamina or AI-hearing events.
+
+The original 0.8-second door animation/collision gate is preserved, with a moving
+handle and one sound per successful opening. Fuse/lockbox panels animate only
+visual children over 0.45 seconds; powered indicators and final panel poses restore
+without replaying rewards/sounds. Board removal adds two short-lived fragments
+without colliders or delayed key access. Successful pickups/battery use trigger
+sound and small first-person feedback. Existing reversible cabinet and paranormal
+animations now have contextual creak/knock/presence sounds and subtle reaction.
+
+### Audio and controls
+
+Sixteen original mono 22,050-Hz, 16-bit WAVs total **750,840 bytes**. Rebuild with:
+
+```powershell
+.\.venv\Scripts\python.exe -m game.assets.generate_audio
+```
+
+The generator uses deterministic synthesis and no sampled recordings. The
+manifest uses `LicenseRef-ProjectOriginal`; `game/assets/LICENSE.txt` preserves
+project-author rights and the existing engine/project licenses. No third-party
+asset attribution is needed. These are intentionally modest synthesized cues,
+not realistic recorded Foley or professional voice performances.
+
+The audio manager keeps one voice per cue, cached loading, cooldowns, loop
+reuse, distance attenuation for positioned interactions, and master/category
+volume control. Footsteps use displacement/cadence and stay silent against walls;
+sprinting is louder and crouching softer. Ambient/tension loops follow the existing
+director's chase/quiet context. Search/inspection/capture cues are rate-limited,
+with no precise ghost position cue. Fuse, lockbox, crowbar, door, pickup, battery,
+flashlight and inventory/menu controls have feedback. Gameplay audio pauses on
+pause/focus loss: loops resume at their saved position; one-shots are cancelled.
+Death/win/menu transitions and disposal stop gameplay clips; only short UI cues
+remain available in menus. Staged loads never start ambience before activation.
+
+Settings now persist texture quality (64/128 pixels), decorative detail (skirting),
+camera bob/sway (0-100%), and Master/Ambience/SFX volume. They apply live; older
+partial preferences receive defaults. Existing brightness, shadow quality,
+reduced flicker/shake, key rebinding and text scaling remain available. Default
+motion is 25%; Master 70%, Ambience 35%, SFX 65%. Low texture/detail plus shadows
+Off are available for slower hardware; shadows Off still permits light leaks.
+No extra lights, bloom or costly postprocessing were introduced. The original
+camera spotlight, shadows, fog, battery drain and reduced-flicker behavior remain.
+
+### Persistence and validation
+
+Save/checkpoint schema remains **version 1**. Textures, pose phases, fragments,
+audio playback and camera bob are transient. Restored puzzle panels take their
+completed pose immediately; new scenes reset motion, ghost animation and audio.
+Load staging/rollback keeps outgoing gameplay intact on validation failure.
+
+**Final complete suite: 194 tests passed in 254.522 seconds**, including every
+one of the original 175 cases and 19 new regressions. Tests cover original PCM,
+asset metadata/path/corruption/fallback/cache behavior, native BAM loading,
+volume/attenuation/cooldown/loop lifecycle with a fake audio backend, cadence at
+4/30/60/120 FPS, material lighting/quality/collision/nav invariants, procedural
+motion timing, no beam delay, puzzle animation/restoration/fragments, and save/load,
+restart/capture/menu cleanup. Existing render-pixel, perception/navigation,
+hiding, progression, persistence and accessibility checks remain intact.
+The 11 asset/audio cases and native OpenAL smoke were rerun successfully after
+normalizing footstep/knock transients and adding faint synthesized wind.
+Compilation and `git diff --check` pass. Native engine tests are offscreen with
+simulated input and a silent audio backend; they are not human playtesting.
+
+The actual `main.py` was also launched in native Windows windows:
+
+- `presentation_smoke`: live exploration/chase/paranormal/capture timing, R restart,
+  five room OFF/ON pairs, humanoid/chase/puzzle/jumpscare and graphics/audio settings.
+- `audio_smoke`: **NATIVE_AUDIO_PLAYBACK_OK** on OpenAL; all 16 clips, volume/mute,
+  pause/resume, focus-loss cancellation, capture and restart/menu cleanup verified
+  through backend status. No human listening is claimed.
+- `windowed_smoke --scripted-pointer`: two complete puzzle-to-escape routes,
+  real controller W/rays/E/Tab inputs, incorrect/correct code, batteries, live
+  ghost wardrobe inspection/capture, six terminal restarts, three window sizes,
+  three text scales, manual/checkpoint Continue/Retry, 25 loads/pause cycles and
+  600 simulated seconds. The ghost is disabled only for deterministic route and
+  long-profile fixtures; live survival/capture is separately exercised.
+
+The first strict native-pointer run stopped when Windows denied foreground
+access. The explicit fallback traverses a scripted lens ray against real UI
+colliders rather than injecting a hovered entity; it prints its limitation.
+Physical mouse capture, looking and Alt-Tab still require a human check.
+No Linux virtual display was available/needed on this Windows environment.
+
+During the native long-run fixture, warm load 5 and load 25 both had **504 entities,
+151 registered colliders, one ghost, one manager, three lights, nine tasks and
+one HUD sequence**. The HUD sequence expired normally by the end. Python traced
+allocation rose from 1,322,405 to 1,350,586 bytes over these loads; process private
+memory rose from 296.6 to 318.5 MB then fell to 305.4 MB after the simulation.
+Counts show no scene/task/light growth in that run; driver/caching allocations are
+not proof of zero memory leakage. The deliberately large 0.5-second simulation
+steps plus tracemalloc measured median 174.84 / p95 252.85 ms; this is a stress
+fixture, not a normal-play FPS measurement.
+
+### Native performance and screenshots
+
+| Scenario | Baseline median / p95 ms | Updated median / p95 ms | Low settings median / p95 ms |
+|---|---:|---:|---:|
+| Exploration | 19.25 / 27.10 | 19.93 / 28.03 | 14.24 / 21.31 |
+| Chase | 21.46 / 32.89 | 24.20 / 29.84 | 18.67 / 26.04 |
+| Paranormal | 18.57 / 28.15 | 24.75 / 41.72 | 15.91 / 23.89 |
+| Jumpscare | 14.75 / 21.87 | 16.79 / 27.69 | 13.83 / 18.86 |
+
+Timing includes a task-manager step and an additional render call, with fixed
+1/60 simulation time, 120 samples per ordinary scenario, 70 for capture, default
+512 flashlight shadows and silent audio for comparable rendering costs. It is a
+scripted fixture on the RTX 3050 Laptop GPU, not an ordinary-laptop guarantee or
+a GPU-isolated benchmark. No actual GPU draw-call/VRAM measurement was available;
+scene geom counts and RAM image bytes are reported explicitly as proxies.
+
+Ordinary scenario entity count grew 463 -> 511 and scene geoms 242 -> 265.
+The six additional registered colliders (151 -> 157) are the new settings rows;
+house colliders remain **102** and registered lights remain **3** in every mode.
+Process private memory in exploration was 133.2 -> 154.3 MB;
+working set 142.3 -> 158.3 MB.
+Six procedural texture RAM images total **288 KiB** at standard quality;
+the low mode switches house surfaces to 64 pixels while the handheld/ghost keep
+small 128-pixel materials. The quality cache retains both generated sets, totaling
+**360 KiB** in the low-mode run (12 textures). These bytes exclude GPU storage,
+mipmaps/driver overhead and engine font images. Low settings measured 138.7 MB private
+memory. Timing increased at standard settings; the low mode improves cost by
+removing skirting and spotlight shadows, with the documented light-leak tradeoff.
+The chase fixture asserts the real ghost moved and stayed in CHASE; its screenshot
+freezes that resulting pose for inspection. The committed baseline was loaded
+read-only into memory, without resetting or checking out project files.
+
+The same-pose ROI brightness (0-255) in final standard screenshots increased with
+the beam: foyer **6.65 -> 22.92**,
+hallway **5.12 -> 8.48**,
+bedroom **6.64 -> 24.32**,
+kitchen **6.49 -> 23.16**.
+All five authored OFF/ON pairs passed the pixel comparison. Native images were
+visually inspected for dim navigation, actual textured geometry/ghost illumination,
+readable settings and controlled capture presentation; no unintended white surfaces
+or shader errors were seen.
+
+Screenshots/profile JSON are ignored development evidence in `game/tests/`,
+not imported game assets. Inspect these native captures:
+
+- [Foyer OFF](game/tests/render_m8_after_foyer_off.png) / [ON](game/tests/render_m8_after_foyer_on.png)
+- [Hallway OFF](game/tests/render_m8_after_main_hall_off.png) / [ON](game/tests/render_m8_after_main_hall_on.png)
+- [Bedroom](game/tests/render_m8_after_bedroom_on.png), [Kitchen](game/tests/render_m8_after_kitchen_on.png)
+- [Ghost](game/tests/render_m8_after_ghost_model.png), [Chase](game/tests/render_m8_after_ghost_chase.png)
+- [Puzzle](game/tests/render_m8_after_puzzle.png), [Jumpscare](game/tests/render_m8_after_jumpscare.png)
+- [Graphics](game/tests/render_m8_after_graphics_settings.png) / [Audio](game/tests/render_m8_after_audio_settings.png)
+- [Baseline profile](game/tests/render_m8_baseline_profile.json), [After](game/tests/render_m8_after_profile.json),
+  [Low settings](game/tests/render_m8_low_profile.json), [Persistence](game/tests/render_persistence_profile.json),
+  [Actual audio](game/tests/render_m8_audio_profile.json)
+
+### Files changed
+
+Existing modules modified:
+
+- `game/game_manager.py`, `game/scene_manager.py`, `game/settings.py`
+- `game/ghost/ghost.py`, `game/ghost/jumpscare.py`
+- `game/player/player.py`
+- `game/world/house.py`, `game/world/room.py`, `game/world/door.py`, `game/world/puzzles.py`
+- `game/systems/audio_manager.py`, `game/systems/horror_manager.py`, `game/systems/progression.py`
+- `game/items/item.py`, `game/items/flashlight.py`, `game/items/battery.py`, `game/items/key.py`
+- `game/ui/main_menu.py`, `game/ui/inventory_ui.py`
+- `game/tests/test_prototype.py`, `game/tests/windowed_smoke.py`, `README.md`
+
+Created:
+
+- `game/systems/asset_manager.py`, `game/ghost/ghost_visual.py`, `game/player/camera_presentation.py`
+- `game/assets/manifest.json`, `game/assets/LICENSE.txt`, `game/assets/generate_audio.py`
+- `game/assets/audio/ambient/{ambience,tension,creak,knock}.wav`
+- `game/assets/audio/footsteps/step.wav`
+- `game/assets/audio/ghost/{presence,search,inspect,capture}.wav`
+- `game/assets/audio/interactions/{door,fuse,lockbox,crowbar,pickup,battery,select}.wav`
+- `game/tests/test_presentation.py`, `game/tests/presentation_smoke.py`, `game/tests/audio_smoke.py`
+
+### Reproduction, limitations and next milestone
+
+```powershell
+Set-Location C:\Users\User\Desktop\Sinister_Secrets
+.\.venv\Scripts\python.exe -m compileall -q main.py game
+.\.venv\Scripts\python.exe -m unittest discover -s game/tests -v
+.\.venv\Scripts\python.exe -m game.tests.presentation_smoke --label after --silent
+.\.venv\Scripts\python.exe -m game.tests.presentation_smoke --label low --silent --low
+.\.venv\Scripts\python.exe -m game.tests.audio_smoke
+.\.venv\Scripts\python.exe -m game.tests.windowed_smoke --scripted-pointer
+.\.venv\Scripts\python.exe main.py
+```
+
+For human testing, start New Game, collect the foyer flashlight with E, toggle F,
+walk/sprint/crouch and turn the mouse near walls. Compare room darkness and beam
+occlusion; listen for footsteps only while moving, including sprinting against a
+wall. Adjust all three volumes, camera bob, reduced shake/flicker, texture/detail
+and UI size; Apply, resume, and relaunch to check preferences. Pause/Alt-Tab and
+confirm gameplay sound stops, with a single resumed ambience loop.
+
+Read the living-room keeper's note; find/install the storage fuse in the kitchen;
+read the newly enabled kitchen tally; enter the unchanged dining combination
+**2417**; use the crowbar on bedroom boards; collect the exit key; open the north
+exit, wait for the complete door animation, and walk outside. Use Tab/U/Enter for
+stored batteries. Save from a safe pause and Continue/Retry; confirm solved puzzle
+panels and absent pickups. Observe patrol/search/chase/wardrobe inspection,
+get caught, use R during and after capture, then repeat after escaping. Resize the
+window, try all text sizes, and inspect narrow/low-ceiling and hiding views.
+
+Remaining limitations: geometry/animations are stylized procedural placeholders,
+not imported skinned models or production clips. Textures are small repeating
+albedo patterns without PBR/normal maps or bespoke dirt placement; furniture
+silhouettes remain the established geometric assemblies. Interaction pickup
+feedback is sound/camera motion rather than a separate hand/grab animation.
+Positional audio currently attenuates by distance, without stereo spatialization,
+wall occlusion or reverb. Audio balance, synthetic timbre and camera comfort need
+human listening/playtesting. Real capture audio follows wall-clock playback;
+simulation-speed tests do not validate its perceived sync. Shadow-Off light leaks
+and shadow aliasing remain engine limitations. Existing icon/sRGB/foreground
+warnings were observed; no game exceptions or shader compilation failures occurred
+in the successful runs. Integrated-GPU/ordinary-laptop performance remains untested.
+
+Milestone 9 should begin with human audio/motion/accessibility and integrated-GPU
+profiling, then tune detection/route fairness and horror pacing using playtest
+records. Optimize/bake visual meshes if needed before increasing asset detail.
+Next develop original polished Foley, spatial audio/occlusion and authored ghost
+clips/interaction gestures, retaining the existing regression and persistence gates.
 
 ## Milestone 7: saves, checkpoints, accessibility, and longer sessions
 
